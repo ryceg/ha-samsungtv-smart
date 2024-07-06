@@ -1,4 +1,5 @@
 """The samsungtv_smart integration."""
+
 from __future__ import annotations
 
 import asyncio

@@ -1,4 +1,5 @@
 """Constants for the samsungtv_smart integration."""
+
 from enum import Enum
 
 
