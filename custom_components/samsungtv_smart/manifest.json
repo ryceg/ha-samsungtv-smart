@@ -1,7 +1,7 @@
 {
   "domain": "samsungtv_smart",
   "name": "SamsungTV Smart",
-  "after_dependencies": "smartthings",
+  "after_dependencies": ["smartthings"],
   "codeowners": ["@jaruba", "@ollo69", "@screwdgeh"],
   "config_flow": true,
   "dependencies": ["http"],
