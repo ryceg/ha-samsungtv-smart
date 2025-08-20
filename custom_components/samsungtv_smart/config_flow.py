@@ -43,7 +43,12 @@ from homeassistant.helpers.selector import (
     SelectSelectorMode,
 )
 
-from . import SamsungTVInfo, get_device_info, is_valid_ha_version
+from . import (
+    SamsungTVInfo,
+    get_device_info,
+    get_smartthing_api_key,
+    is_valid_ha_version,
+)
 from .const import (
     ATTR_DEVICE_MAC,
     ATTR_DEVICE_MODEL,
@@ -69,6 +74,7 @@ from .const import (
     CONF_USE_LOCAL_LOGO,
     CONF_USE_MUTE_CHECK,
     CONF_USE_ST_CHANNEL_INFO,
+    CONF_USE_ST_INT_API_KEY,
     CONF_USE_ST_STATUS_INFO,
     CONF_WOL_REPEAT,
     CONF_WS_NAME,
@@ -160,6 +166,8 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
         self._tv_info: SamsungTVInfo | None = None
         self._host = None
         self._api_key = None
+        self._st_api_key = None
+        self._use_st_api_key = False
         self._device_id = None
         self._name = None
         self._ws_name = None
@@ -240,7 +248,8 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
         """Get api key in configured entries if available."""
         for entry in self._async_current_entries():
             if CONF_API_KEY in entry.data:
-                return entry.data[CONF_API_KEY]
+                if not entry.data.get(CONF_USE_ST_INT_API_KEY):
+                    return entry.data[CONF_API_KEY]
         return None
 
     async def async_step_user(self, user_input=None) -> ConfigFlowResult:
@@ -258,6 +267,7 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
         if not self._user_data:
             if api_key := self._get_api_key():
                 self._user_data = {CONF_API_KEY: api_key}
+            self._st_api_key = get_smartthing_api_key(self.hass)
 
         if user_input is None:
             return self._show_form()
@@ -274,6 +284,9 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
         self._host = ip_address
         self._name = user_input[CONF_NAME]
         self._api_key = user_input.get(CONF_API_KEY)
+        self._use_st_api_key = user_input.get(CONF_USE_ST_INT_API_KEY)
+        if self._use_st_api_key:
+            self._api_key = self._st_api_key
 
         use_ha_name = user_input.get(CONF_USE_HA_NAME, False)
         if use_ha_name:
@@ -346,7 +359,13 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
         if unique_id != self._host:
             updates[CONF_HOST] = self._host
 
-        await self.async_set_unique_id(unique_id)
+        if entry := await self.async_set_unique_id(unique_id):
+            if CONF_API_KEY in entry.data:
+                if self._api_key and not self._use_st_api_key:
+                    updates[CONF_API_KEY] = self._api_key
+                if CONF_USE_ST_INT_API_KEY in self.data or self._use_st_api_key:
+                    updates[CONF_USE_ST_INT_API_KEY] = self._use_st_api_key
+
         self._abort_if_unique_id_configured(updates or None)
 
         return self._save_entry()
@@ -377,6 +396,8 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._api_key and self._device_id:
             data[CONF_API_KEY] = self._api_key
             data[CONF_DEVICE_ID] = self._device_id
+            if self._use_st_api_key:
+                data[CONF_USE_ST_INT_API_KEY] = True
             title += " (SmartThings)"
 
         options = None
@@ -388,21 +409,29 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
 
     def _get_init_schema(self) -> vol.Schema:
         data = self._user_data or {}
-        init_schema = vol.Schema(
-            {
-                vol.Required(CONF_HOST, default=data.get(CONF_HOST, "")): str,
-                vol.Required(CONF_NAME, default=data.get(CONF_NAME, "")): str,
-                vol.Optional(
-                    CONF_USE_HA_NAME, default=data.get(CONF_USE_HA_NAME, False)
-                ): bool,
-                vol.Optional(
-                    CONF_API_KEY,
-                    description={"suggested_value": data.get(CONF_API_KEY, "")},
-                ): str,
-            }
-        )
+        init_schema = {
+            vol.Required(CONF_HOST, default=data.get(CONF_HOST, "")): str,
+            vol.Required(CONF_NAME, default=data.get(CONF_NAME, "")): str,
+            vol.Optional(
+                CONF_USE_HA_NAME, default=data.get(CONF_USE_HA_NAME, False)
+            ): bool,
+            vol.Optional(
+                CONF_API_KEY,
+                description={"suggested_value": data.get(CONF_API_KEY, "")},
+            ): str,
+        }
 
-        return init_schema
+        if self._st_api_key:
+            init_schema.update(
+                {
+                    vol.Optional(
+                        CONF_USE_ST_INT_API_KEY,
+                        default=data.get(CONF_USE_ST_INT_API_KEY, False),
+                    ): bool,
+                }
+            )
+
+        return vol.Schema(init_schema)
 
     @callback
     def _show_form(self, errors: str | None = None, step_id="user") -> ConfigFlowResult:
