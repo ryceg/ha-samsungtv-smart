@@ -11,12 +11,12 @@ import voluptuous as vol
 
 from homeassistant.components.binary_sensor import DOMAIN as BS_DOMAIN
 from homeassistant.config_entries import (
+    SOURCE_RECONFIGURE,
+    SOURCE_USER,
     ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlow,
-    SOURCE_RECONFIGURE,
-    SOURCE_USER,
 )
 from homeassistant.const import (
     ATTR_DEVICE_ID,
