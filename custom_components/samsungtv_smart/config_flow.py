@@ -15,6 +15,8 @@ from homeassistant.config_entries import (
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlow,
+    SOURCE_RECONFIGURE,
+    SOURCE_USER,
 )
 from homeassistant.const import (
     ATTR_DEVICE_ID,
@@ -252,7 +254,9 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
                     return entry.data[CONF_API_KEY]
         return None
 
-    async def async_step_user(self, user_input=None) -> ConfigFlowResult:
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Handle a flow initialized by the user."""
 
         if not is_valid_ha_version():
@@ -310,7 +314,9 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return await self._manage_result(result, True)
 
-    async def async_step_stdevice(self, user_input=None) -> ConfigFlowResult:
+    async def async_step_stdevice(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Handle a flow to select ST device."""
         if user_input is None:
             return self._show_form(step_id="stdevice")
@@ -320,7 +326,9 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
         result = await self._try_connect()
         return await self._manage_result(result)
 
-    async def async_step_stdeviceid(self, user_input=None) -> ConfigFlowResult:
+    async def async_step_stdeviceid(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Handle a flow to manual input a ST device."""
         if user_input is None:
             return self._show_form(step_id="stdeviceid")
@@ -336,6 +344,44 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
             return self._show_form(errors=result, step_id="stdeviceid")
         return await self._manage_result(result)
 
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle reconfiguration of the integration."""
+        entry = self._get_reconfigure_entry()
+        if entry.unique_id == entry.data[CONF_HOST]:
+            return self.async_abort(reason="host_unique_id")
+
+        if not self._ws_name:
+            self._ws_name = entry.data[CONF_WS_NAME]
+            if CONF_API_KEY in entry.data:
+                self._device_id = entry.data.get(CONF_DEVICE_ID)
+            self._st_api_key = get_smartthing_api_key(self.hass)
+
+        if user_input is None:
+            return self._show_form(errors=None, step_id=SOURCE_RECONFIGURE)
+
+        ip_address = await self.hass.async_add_executor_job(
+            _get_ip, user_input[CONF_HOST]
+        )
+        if not ip_address:
+            return self._show_form(errors="invalid_host", step_id=SOURCE_RECONFIGURE)
+
+        self._async_abort_entries_match({CONF_HOST: ip_address})
+
+        self._host = ip_address
+        self._use_st_api_key = user_input.get(CONF_USE_ST_INT_API_KEY)
+        api_key = entry.data.get(CONF_API_KEY)
+        if api_key:
+            if user_input.get(CONF_USE_ST_INT_API_KEY, False):
+                api_key = self._st_api_key
+            else:
+                api_key = user_input.get(CONF_API_KEY) or api_key
+        self._api_key = api_key
+
+        result = await self._try_connect()
+        return self._manage_reconfigure(result)
+
     async def _manage_result(self, result: str, is_user_step=False) -> ConfigFlowResult:
         """Manage the previous result."""
 
@@ -347,28 +393,38 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
                 return self._show_form()
             return await self.async_step_user()
 
-        updates = {}
-        if mac := self._device_info.get(ATTR_DEVICE_MAC):
-            updates[CONF_MAC] = mac
-
         if ATTR_DEVICE_ID in self._device_info:
             unique_id = self._device_info[ATTR_DEVICE_ID]
         else:
-            unique_id = mac or self._host
+            mac = self._device_info.get(ATTR_DEVICE_MAC)
+            unique_id = mac or self._host  # as last option we use host as unique id
 
-        if unique_id != self._host:
-            updates[CONF_HOST] = self._host
-
-        if entry := await self.async_set_unique_id(unique_id):
-            if CONF_API_KEY in entry.data:
-                if self._api_key and not self._use_st_api_key:
-                    updates[CONF_API_KEY] = self._api_key
-                if CONF_USE_ST_INT_API_KEY in self.data or self._use_st_api_key:
-                    updates[CONF_USE_ST_INT_API_KEY] = self._use_st_api_key
-
-        self._abort_if_unique_id_configured(updates or None)
+        await self.async_set_unique_id(unique_id)
+        self._abort_if_unique_id_configured()
 
         return self._save_entry()
+
+    @callback
+    def _manage_reconfigure(self, result: str) -> ConfigFlowResult:
+        """Manage the reconfigure result."""
+
+        if result != RESULT_SUCCESS:
+            self._error = result
+            return self._show_form(step_id=SOURCE_RECONFIGURE)
+
+        entry = self._get_reconfigure_entry()
+        updates = {
+            CONF_HOST: self._host,
+            CONF_PORT: self._tv_info.ws_port,
+        }
+        if self._token:
+            updates[CONF_TOKEN] = self._token
+        if self._api_key:
+            updates[CONF_API_KEY] = self._api_key
+            if CONF_USE_ST_INT_API_KEY in entry.data or self._use_st_api_key:
+                updates[CONF_USE_ST_INT_API_KEY] = self._use_st_api_key
+
+        return self.async_update_reload_and_abort(entry, data_updates=updates)
 
     @callback
     def _save_entry(self) -> ConfigFlowResult:
@@ -408,6 +464,7 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_create_entry(title=title, data=data, options=options)
 
     def _get_init_schema(self) -> vol.Schema:
+        """Return the schema for initial configuration form."""
         data = self._user_data or {}
         init_schema = {
             vol.Required(CONF_HOST, default=data.get(CONF_HOST, "")): str,
@@ -426,15 +483,52 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
                 {
                     vol.Optional(
                         CONF_USE_ST_INT_API_KEY,
-                        default=data.get(CONF_USE_ST_INT_API_KEY, False),
+                        default=data.get(CONF_USE_ST_INT_API_KEY, True),
                     ): bool,
                 }
             )
 
         return vol.Schema(init_schema)
 
+    def _get_reconfigure_schema(self) -> vol.Schema:
+        """Return the schema for reconfiguration form."""
+        entry = self._get_reconfigure_entry()
+        data = entry.data
+        init_schema = {
+            vol.Required(CONF_HOST, default=data.get(CONF_HOST, "")): str,
+        }
+
+        if CONF_API_KEY in data:
+            use_st_key: bool = (
+                data.get(CONF_USE_ST_INT_API_KEY, False)
+                and self._st_api_key is not None
+            )
+            sugg_val = data[CONF_API_KEY] if not use_st_key else ""
+            init_schema.update(
+                {
+                    vol.Optional(
+                        CONF_API_KEY,
+                        description={"suggested_value": sugg_val},
+                    ): str,
+                }
+            )
+
+            if self._st_api_key:
+                init_schema.update(
+                    {
+                        vol.Optional(
+                            CONF_USE_ST_INT_API_KEY,
+                            default=data.get(CONF_USE_ST_INT_API_KEY, use_st_key),
+                        ): bool,
+                    }
+                )
+
+        return vol.Schema(init_schema)
+
     @callback
-    def _show_form(self, errors: str | None = None, step_id="user") -> ConfigFlowResult:
+    def _show_form(
+        self, errors: str | None = None, step_id=SOURCE_USER
+    ) -> ConfigFlowResult:
         """Show the form to the user."""
         base_err = errors or self._error
         self._error = None
@@ -443,6 +537,8 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema = self._st_devices_schema
         elif step_id == "stdeviceid":
             data_schema = vol.Schema({vol.Required(CONF_DEVICE_ID): str})
+        elif step_id == "reconfigure":
+            data_schema = self._get_reconfigure_schema()
         else:
             data_schema = self._get_init_schema()
 

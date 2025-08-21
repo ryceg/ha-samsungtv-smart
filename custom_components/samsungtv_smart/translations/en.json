@@ -2,8 +2,9 @@
   "config": {
     "abort": {
       "already_configured": "This Samsung TV is already configured.",
-      "already_configured_updated": "Configuration updated for this Samsung TV already configured.",
       "already_in_progress": "Samsung TV configuration is already in progress.",
+      "host_unique_id": "Reconfiguration not possible beacause hostname is used as unique id. Please remove this entry and configure a new one.",
+      "reconfigure_successful": "Samsung TV reconfiguration completed successfully.",
       "unsupported_version": "This integration require at least HomeAssistant version {req_ver}, you are running version {run_ver}."
     },
     "error": {
@@ -28,7 +29,15 @@
           "api_key": "SmartThings generated token (optional)",
           "use_st_int_api_key": "Use SmartThings credential provided by SmartThings integration"
         },
-        "description": "Enter your Samsung TV information. SmartThings token is optional but really suggested. After confirm you should see a popup on your TV asking for authorization."
+        "description": "Enter your Samsung TV information. SmartThings token is optional but really suggested.\nAfter confirm you should see a popup on your TV asking for authorization."
+      },
+      "reconfigure": {
+        "data": {
+          "host": "Host or IP address",
+          "api_key": "SmartThings generated token (optional, if empty will be used the existing)",
+          "use_st_int_api_key": "Use SmartThings credential provided by SmartThings integration"
+        },
+        "description": "Enter your Samsung TV information to update. SmartThings configuration can be changed but not removed.\nAfter confirm you should see a popup on your TV asking for authorization."
       },
       "stdevice": {
         "data": {

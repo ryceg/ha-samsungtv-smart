@@ -2,8 +2,9 @@
   "config": {
     "abort": {
       "already_configured": "Questo Samsung TV \u00e8 gi\u00e0 configurato.",
-      "already_configured_updated": "Configurazione aggiornata per questo Samsung TV gi\u00e0 configurato.",
       "already_in_progress": "La configurazione di Samsung TV \u00e8 gi\u00e0 in corso.",
+      "host_unique_id": "Riconfigurazione non possibile poichè il nome host è usato come unique id. Rimuovere questa entry e configurarne una nuova.",
+      "reconfigure_successful": "Riconfigurazione Samsung TV completata correttamente.",
       "unsupported_version": "Questa integrazione richiede almeno la versione {req_ver} di HomeAssistant, tu stai usando la versione {run_ver}."
     },
     "error": {
@@ -28,7 +29,15 @@
           "api_key": "SmartThings token generato (opzionale)",
           "use_st_int_api_key": "Usa credenziali SmartThings fornite dall'integrazione SmartThings"
         },
-        "description": "Inserisci le informazioni del tuo Samsung TV. Il token SmartThings \u00e8 opzionale ma fortemente consigliato. Dopo aver confermato i dati, dovresti vedere un messaggio sul TV in cui \u00e8 richiesta l'autorizzazione."
+        "description": "Inserisci le informazioni del tuo Samsung TV. Il token SmartThings \u00e8 opzionale ma fortemente consigliato.\nDopo aver confermato i dati, dovresti vedere un messaggio sul TV in cui \u00e8 richiesta l'autorizzazione."
+      },
+      "reconfigure": {
+        "data": {
+          "host": "Host o indirizzo IP",
+          "api_key": "SmartThings token generato (opzionale, se vuoto verrà usato quello esistente)",
+          "use_st_int_api_key": "Usa credenziali SmartThings fornite dall'integrazione SmartThings"
+        },
+        "description": "Inserisci le informazioni da aggiornare del tuo Samsung TV. Le configurazioni SmartThings possono essere cambiate ma non rimosse.\nDopo aver confermato i dati, dovresti vedere un messaggio sul TV in cui \u00e8 richiesta l'autorizzazione."
       },
       "stdevice": {
         "data": {
