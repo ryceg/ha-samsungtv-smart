@@ -1,4 +1,4 @@
-"""Smartthings TV integration."""
+"""SmartThings TV integration."""
 
 from __future__ import annotations
 

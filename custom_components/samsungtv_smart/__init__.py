@@ -305,7 +305,7 @@ def _migrate_entry_unique_id(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 @callback
-def get_smartthing_api_key(hass: HomeAssistant) -> str | None:
+def get_smartthings_api_key(hass: HomeAssistant) -> str | None:
     """Get the smartthing integration configured API key."""
     entries_list = hass.config_entries.async_entries(ST_DOMAIN, False, False)
     if not entries_list:

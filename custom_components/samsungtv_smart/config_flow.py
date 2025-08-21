@@ -48,7 +48,7 @@ from homeassistant.helpers.selector import (
 from . import (
     SamsungTVInfo,
     get_device_info,
-    get_smartthing_api_key,
+    get_smartthings_api_key,
     is_valid_ha_version,
 )
 from .const import (
@@ -271,7 +271,7 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
         if not self._user_data:
             if api_key := self._get_api_key():
                 self._user_data = {CONF_API_KEY: api_key}
-            self._st_api_key = get_smartthing_api_key(self.hass)
+            self._st_api_key = get_smartthings_api_key(self.hass)
 
         if user_input is None:
             return self._show_form()
@@ -356,7 +356,7 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
             self._ws_name = entry.data[CONF_WS_NAME]
             if CONF_API_KEY in entry.data:
                 self._device_id = entry.data.get(CONF_DEVICE_ID)
-            self._st_api_key = get_smartthing_api_key(self.hass)
+            self._st_api_key = get_smartthings_api_key(self.hass)
 
         if user_input is None:
             return self._show_form(errors=None, step_id=SOURCE_RECONFIGURE)

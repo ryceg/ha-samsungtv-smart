@@ -57,7 +57,7 @@ from homeassistant.helpers.storage import STORAGE_DIR
 from homeassistant.util import Throttle, dt as dt_util
 from homeassistant.util.async_ import run_callback_threadsafe
 
-from . import get_smartthing_api_key
+from . import get_smartthings_api_key
 from .api.samsungcast import SamsungCastTube
 from .api.samsungws import ArtModeStatus, SamsungTVAsyncRest, SamsungTVWS
 from .api.smartthings import SmartThingsTV, STStatus
@@ -364,7 +364,7 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
     ) -> str | None:
         """Update the smartthing token when change on native integration."""
         _LOGGER.debug("Trying to update smartthing access token")
-        if not (new_token := get_smartthing_api_key(self.hass)):
+        if not (new_token := get_smartthings_api_key(self.hass)):
             _LOGGER.warning(
                 "Failed to retrieve SmartThings integration access token,"
                 " using last available"
