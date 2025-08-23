@@ -12,9 +12,11 @@
       "invalid_host": "Nome host non valido.",
       "not_successful": "Impossibile aprire la connessione WebSocket con questo dispositivo Samsung TV.",
       "not_supported": "Questo dispositivo Samsung TV non \u00e8 attualmente supportato.",
-      "wrong_api_key": "SmartThings token errato.",
+      "only_key_or_st": "Specificare solo il token di accesso o l'entry SmartThings.",
+      "st_api_key_fail": "Errore nel recuperare il token di accesso dall'entry SmartThings selezionata.",
       "st_device_not_found": "SmartThings TV deviceID non trovato.",
-      "st_device_used": "SmartThings TV deviceID gi\u00e0 utilizzato."
+      "st_device_used": "SmartThings TV deviceID gi\u00e0 utilizzato.",
+      "wrong_api_key": "SmartThings token errato."
     },
     "flow_title": "SamsungTV Smart: {model}",
     "step": {
@@ -37,7 +39,7 @@
           "api_key": "SmartThings token generato (opzionale, se vuoto verrà usato quello esistente)",
           "st_entry_unique_id": "Entry SmartThings usata per fornire le credenziali SmartThings"
         },
-        "description": "Inserisci le informazioni da aggiornare del tuo Samsung TV. Le configurazioni SmartThings possono essere cambiate ma non rimosse.\nDopo aver confermato i dati, dovresti vedere un messaggio sul TV in cui \u00e8 richiesta l'autorizzazione."
+        "description": "Inserisci le informazioni da aggiornare del tuo Samsung TV. Le configurazioni SmartThings possono essere cambiate ma non rimosse.\nDopo aver confermato i dati, potresti vedere un messaggio sul TV in cui \u00e8 richiesta l'autorizzazione."
       },
       "stdevice": {
         "data": {

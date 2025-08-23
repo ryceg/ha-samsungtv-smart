@@ -169,7 +169,7 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
         self._tv_info: SamsungTVInfo | None = None
         self._host = None
         self._api_key = None
-        self._st_unique_id = None
+        self._st_entry_unique_id = None
         self._device_id = None
         self._name = None
         self._ws_name = None
@@ -230,18 +230,19 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return RESULT_SUCCESS
 
-    async def _try_connect(self) -> str:
+    async def _try_connect(self, *, port=None, token=None, skip_info=False) -> str:
         """Try to connect and check auth."""
         self._tv_info = SamsungTVInfo(self.hass, self._host, self._ws_name)
 
         session = async_get_clientsession(self.hass)
         result = await self._tv_info.try_connect(
-            session, self._api_key, self._device_id
+            session, self._api_key, self._device_id, ws_port=port, ws_token=token
         )
         if result == RESULT_SUCCESS:
             self._token = self._tv_info.ws_token
             self._ping_port = self._tv_info.ping_port
-            self._device_info = await get_device_info(self._host, session)
+            if not skip_info:
+                self._device_info = await get_device_info(self._host, session)
 
         return result
 
@@ -286,16 +287,18 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
 
         self._host = ip_address
         self._name = user_input[CONF_NAME]
-        self._api_key = user_input.get(CONF_API_KEY)
-        self._st_unique_id = None
+        api_key = user_input.get(CONF_API_KEY)
+        st_entry_unique_id = user_input.get(CONF_ST_ENTRY_UNIQUE_ID)
+        if api_key and st_entry_unique_id:
+            return self._show_form(errors="only_key_or_st")
 
-        st_api_key = None
-        if st_entry_unique_id := user_input.get(CONF_ST_ENTRY_UNIQUE_ID):
-            st_api_key = get_smartthings_api_key(self.hass, st_entry_unique_id)
+        self._st_entry_unique_id = None
+        if st_entry_unique_id:
+            if not (api_key := get_smartthings_api_key(self.hass, st_entry_unique_id)):
+                return self._show_form(errors="st_api_key_fail")
+            self._st_entry_unique_id = st_entry_unique_id
 
-        if st_api_key:
-            self._api_key = st_api_key
-            self._st_unique_id = st_entry_unique_id
+        self._api_key = api_key
 
         use_ha_name = user_input.get(CONF_USE_HA_NAME, False)
         if use_ha_name:
@@ -373,23 +376,29 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
 
         self._async_abort_entries_match({CONF_HOST: ip_address})
 
+        api_key = user_input.get(CONF_API_KEY)
+        st_entry_unique_id = user_input.get(CONF_ST_ENTRY_UNIQUE_ID)
+        if api_key and st_entry_unique_id:
+            return self._show_form(errors="only_key_or_st", step_id=SOURCE_RECONFIGURE)
+
+        self._st_entry_unique_id = None
+        if st_entry_unique_id:
+            if not (api_key := get_smartthings_api_key(self.hass, st_entry_unique_id)):
+                return self._show_form(
+                    errors="st_api_key_fail", step_id=SOURCE_RECONFIGURE
+                )
+            self._st_entry_unique_id = st_entry_unique_id
+        else:
+            api_key = api_key or entry.data.get(CONF_API_KEY)
+
         self._host = ip_address
-        api_key = entry.data.get(CONF_API_KEY)
-        if api_key:
-            self._st_unique_id = None
-            st_api_key = None
-            if st_entry_unique_id := user_input.get(CONF_ST_ENTRY_UNIQUE_ID):
-                st_api_key = get_smartthings_api_key(self.hass, st_entry_unique_id)
-
-            if st_api_key:
-                api_key = st_api_key
-                self._st_unique_id = st_entry_unique_id
-            else:
-                api_key = user_input.get(CONF_API_KEY) or api_key
-
         self._api_key = api_key
 
-        result = await self._try_connect()
+        result = await self._try_connect(
+            port=entry.data.get(CONF_PORT),
+            token=entry.data.get(CONF_TOKEN),
+            skip_info=True,
+        )
         return self._manage_reconfigure(result)
 
     async def _manage_result(self, result: str, is_user_step=False) -> ConfigFlowResult:
@@ -429,12 +438,15 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
         }
         if self._token:
             updates[CONF_TOKEN] = self._token
+
         if self._api_key:
             updates[CONF_API_KEY] = self._api_key
-            if CONF_ST_ENTRY_UNIQUE_ID in entry.data or self._st_unique_id:
-                updates[CONF_ST_ENTRY_UNIQUE_ID] = self._st_unique_id
+            if CONF_ST_ENTRY_UNIQUE_ID in entry.data or self._st_entry_unique_id:
+                updates[CONF_ST_ENTRY_UNIQUE_ID] = self._st_entry_unique_id
 
-        return self.async_update_reload_and_abort(entry, data_updates=updates)
+        return self.async_update_reload_and_abort(
+            entry, data_updates=updates, reload_even_if_entry_is_unchanged=False
+        )
 
     @callback
     def _save_entry(self) -> ConfigFlowResult:
@@ -462,8 +474,8 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._api_key and self._device_id:
             data[CONF_API_KEY] = self._api_key
             data[CONF_DEVICE_ID] = self._device_id
-            if self._st_unique_id:
-                data[CONF_ST_ENTRY_UNIQUE_ID] = self._st_unique_id
+            if self._st_entry_unique_id:
+                data[CONF_ST_ENTRY_UNIQUE_ID] = self._st_entry_unique_id
             title += " (SmartThings)"
 
         options = None
@@ -514,7 +526,7 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
             vol.Required(CONF_HOST, default=data.get(CONF_HOST, "")): str,
         }
 
-        if CONF_API_KEY in data:
+        if CONF_API_KEY in data and CONF_DEVICE_ID in data:
             st_unique_id = data.get(CONF_ST_ENTRY_UNIQUE_ID)
             use_st_key = st_entries is not None and st_unique_id in st_entries
             sugg_val = data[CONF_API_KEY] if not use_st_key else ""

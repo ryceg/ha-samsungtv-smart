@@ -448,18 +448,32 @@ class SamsungTVInfo:
             )
             return RESULT_NOT_SUCCESSFUL
 
-        for port in (8001, 8002):
+        if self._ws_port and self._ws_token:
+            port_list = tuple([self._ws_port, 8001, 8002])
+        else:
+            port_list = (8001, 8002)
+
+        for index, port in enumerate(port_list):
+
+            timeout = 45  # We need this high timeout because waiting for TV auth popup
+            token = None
+            if len(port_list) > 2 and index == 0:
+                timeout = DEFAULT_TIMEOUT
+                token = self._ws_token
+
             try:
                 _LOGGER.info(
-                    "Try to configure SamsungTV %s using port %s",
+                    "Try to configure SamsungTV %s using port %s%s",
                     self._hostname,
                     str(port),
+                    " with existing token" if token else "",
                 )
                 with SamsungTVWS(
                     name=f"{WS_PREFIX} {self._ws_name}",  # this is the name shown in the TV
                     host=self._hostname,
                     port=port,
-                    timeout=45,  # We need this high timeout because waiting for TV auth popup
+                    token=token,
+                    timeout=timeout,
                 ) as remote:
                     remote.open()
                     self._ws_token = remote.token
@@ -517,11 +531,21 @@ class SamsungTVInfo:
         return devices
 
     async def try_connect(
-        self, session: ClientSession, api_key=None, st_device_id=None
+        self,
+        session: ClientSession,
+        api_key=None,
+        st_device_id=None,
+        *,
+        ws_port=None,
+        ws_token=None,
     ):
         """Try connect device"""
         if session is None:
             return RESULT_NOT_SUCCESSFUL
+
+        if ws_port and ws_token:
+            self._ws_port = ws_port
+            self._ws_token = ws_token
 
         result = await self._hass.async_add_executor_job(self._try_connect_ws)
         if result == RESULT_SUCCESS:
