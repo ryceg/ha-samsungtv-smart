@@ -309,8 +309,6 @@ def _migrate_entry_unique_id(hass: HomeAssistant, entry: ConfigEntry) -> None:
 @callback
 def _migrate_smartthings_config(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Migrate smartthings entry usage configuration."""
-    if CONF_ST_ENTRY_UNIQUE_ID in entry.data:
-        return
     if CONF_USE_ST_INT_API_KEY not in entry.data:
         return
 
