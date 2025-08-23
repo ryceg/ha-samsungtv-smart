@@ -516,7 +516,7 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if CONF_API_KEY in data:
             st_unique_id = data.get(CONF_ST_ENTRY_UNIQUE_ID)
-            use_st_key = st_unique_id in st_entries
+            use_st_key = st_entries is not None and st_unique_id in st_entries
             sugg_val = data[CONF_API_KEY] if not use_st_key else ""
             init_schema.update(
                 {
