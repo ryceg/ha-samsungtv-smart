@@ -49,6 +49,7 @@ from . import (
     SamsungTVInfo,
     get_device_info,
     get_smartthings_api_key,
+    get_smartthings_entries,
     is_valid_ha_version,
 )
 from .const import (
@@ -70,13 +71,13 @@ from .const import (
     CONF_POWER_ON_METHOD,
     CONF_SHOW_CHANNEL_NR,
     CONF_SOURCE_LIST,
+    CONF_ST_ENTRY_UNIQUE_ID,
     CONF_SYNC_TURN_OFF,
     CONF_SYNC_TURN_ON,
     CONF_TOGGLE_ART_MODE,
     CONF_USE_LOCAL_LOGO,
     CONF_USE_MUTE_CHECK,
     CONF_USE_ST_CHANNEL_INFO,
-    CONF_USE_ST_INT_API_KEY,
     CONF_USE_ST_STATUS_INFO,
     CONF_WOL_REPEAT,
     CONF_WS_NAME,
@@ -168,8 +169,7 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
         self._tv_info: SamsungTVInfo | None = None
         self._host = None
         self._api_key = None
-        self._st_api_key = None
-        self._use_st_api_key = False
+        self._st_unique_id = None
         self._device_id = None
         self._name = None
         self._ws_name = None
@@ -250,7 +250,7 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
         """Get api key in configured entries if available."""
         for entry in self._async_current_entries():
             if CONF_API_KEY in entry.data:
-                if not entry.data.get(CONF_USE_ST_INT_API_KEY):
+                if not entry.data.get(CONF_ST_ENTRY_UNIQUE_ID):
                     return entry.data[CONF_API_KEY]
         return None
 
@@ -271,7 +271,6 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
         if not self._user_data:
             if api_key := self._get_api_key():
                 self._user_data = {CONF_API_KEY: api_key}
-            self._st_api_key = get_smartthings_api_key(self.hass)
 
         if user_input is None:
             return self._show_form()
@@ -288,9 +287,15 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
         self._host = ip_address
         self._name = user_input[CONF_NAME]
         self._api_key = user_input.get(CONF_API_KEY)
-        self._use_st_api_key = user_input.get(CONF_USE_ST_INT_API_KEY)
-        if self._use_st_api_key:
-            self._api_key = self._st_api_key
+        self._st_unique_id = None
+
+        st_api_key = None
+        if st_entry_unique_id := user_input.get(CONF_ST_ENTRY_UNIQUE_ID):
+            st_api_key = get_smartthings_api_key(self.hass, st_entry_unique_id)
+
+        if st_api_key:
+            self._api_key = st_api_key
+            self._st_unique_id = st_entry_unique_id
 
         use_ha_name = user_input.get(CONF_USE_HA_NAME, False)
         if use_ha_name:
@@ -356,7 +361,6 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
             self._ws_name = entry.data[CONF_WS_NAME]
             if CONF_API_KEY in entry.data:
                 self._device_id = entry.data.get(CONF_DEVICE_ID)
-            self._st_api_key = get_smartthings_api_key(self.hass)
 
         if user_input is None:
             return self._show_form(errors=None, step_id=SOURCE_RECONFIGURE)
@@ -370,13 +374,19 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
         self._async_abort_entries_match({CONF_HOST: ip_address})
 
         self._host = ip_address
-        self._use_st_api_key = user_input.get(CONF_USE_ST_INT_API_KEY)
         api_key = entry.data.get(CONF_API_KEY)
         if api_key:
-            if user_input.get(CONF_USE_ST_INT_API_KEY, False):
-                api_key = self._st_api_key
+            self._st_unique_id = None
+            st_api_key = None
+            if st_entry_unique_id := user_input.get(CONF_ST_ENTRY_UNIQUE_ID):
+                st_api_key = get_smartthings_api_key(self.hass, st_entry_unique_id)
+
+            if st_api_key:
+                api_key = st_api_key
+                self._st_unique_id = st_entry_unique_id
             else:
                 api_key = user_input.get(CONF_API_KEY) or api_key
+
         self._api_key = api_key
 
         result = await self._try_connect()
@@ -421,8 +431,8 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
             updates[CONF_TOKEN] = self._token
         if self._api_key:
             updates[CONF_API_KEY] = self._api_key
-            if CONF_USE_ST_INT_API_KEY in entry.data or self._use_st_api_key:
-                updates[CONF_USE_ST_INT_API_KEY] = self._use_st_api_key
+            if CONF_ST_ENTRY_UNIQUE_ID in entry.data or self._st_unique_id:
+                updates[CONF_ST_ENTRY_UNIQUE_ID] = self._st_unique_id
 
         return self.async_update_reload_and_abort(entry, data_updates=updates)
 
@@ -452,8 +462,8 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._api_key and self._device_id:
             data[CONF_API_KEY] = self._api_key
             data[CONF_DEVICE_ID] = self._device_id
-            if self._use_st_api_key:
-                data[CONF_USE_ST_INT_API_KEY] = True
+            if self._st_unique_id:
+                data[CONF_ST_ENTRY_UNIQUE_ID] = self._st_unique_id
             title += " (SmartThings)"
 
         options = None
@@ -466,6 +476,8 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
     def _get_init_schema(self) -> vol.Schema:
         """Return the schema for initial configuration form."""
         data = self._user_data or {}
+        st_entries = get_smartthings_entries(self.hass)
+
         init_schema = {
             vol.Required(CONF_HOST, default=data.get(CONF_HOST, "")): str,
             vol.Required(CONF_NAME, default=data.get(CONF_NAME, "")): str,
@@ -478,13 +490,15 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
             ): str,
         }
 
-        if self._st_api_key:
+        if st_entries:
+            st_unique_id = data.get(CONF_ST_ENTRY_UNIQUE_ID)
+            sugg_val = st_unique_id if st_unique_id in st_entries else None
             init_schema.update(
                 {
                     vol.Optional(
-                        CONF_USE_ST_INT_API_KEY,
-                        default=data.get(CONF_USE_ST_INT_API_KEY, True),
-                    ): bool,
+                        CONF_ST_ENTRY_UNIQUE_ID,
+                        description={"suggested_value": sugg_val},
+                    ): SelectSelector(_dict_to_select(st_entries)),
                 }
             )
 
@@ -494,32 +508,32 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
         """Return the schema for reconfiguration form."""
         entry = self._get_reconfigure_entry()
         data = entry.data
+        st_entries = get_smartthings_entries(self.hass)
+
         init_schema = {
             vol.Required(CONF_HOST, default=data.get(CONF_HOST, "")): str,
         }
 
         if CONF_API_KEY in data:
-            use_st_key: bool = (
-                data.get(CONF_USE_ST_INT_API_KEY, False)
-                and self._st_api_key is not None
-            )
+            st_unique_id = data.get(CONF_ST_ENTRY_UNIQUE_ID)
+            use_st_key = st_unique_id in st_entries
             sugg_val = data[CONF_API_KEY] if not use_st_key else ""
             init_schema.update(
                 {
                     vol.Optional(
-                        CONF_API_KEY,
-                        description={"suggested_value": sugg_val},
+                        CONF_API_KEY, description={"suggested_value": sugg_val}
                     ): str,
                 }
             )
 
-            if self._st_api_key:
+            if st_entries:
+                sugg_val = st_unique_id if use_st_key else None
                 init_schema.update(
                     {
                         vol.Optional(
-                            CONF_USE_ST_INT_API_KEY,
-                            default=data.get(CONF_USE_ST_INT_API_KEY, use_st_key),
-                        ): bool,
+                            CONF_ST_ENTRY_UNIQUE_ID,
+                            description={"suggested_value": sugg_val},
+                        ): SelectSelector(_dict_to_select(st_entries)),
                     }
                 )
 

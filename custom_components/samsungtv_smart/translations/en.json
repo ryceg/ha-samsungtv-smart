@@ -27,15 +27,15 @@
           "name": "Name assigned to the entity",
           "use_ha_name_for_ws": "Use HA instance name for identification on TV",
           "api_key": "SmartThings generated token (optional)",
-          "use_st_int_api_key": "Use SmartThings credential provided by SmartThings integration"
+          "st_entry_unique_id": "SmartThings entry used to provide SmartThings credential"
         },
-        "description": "Enter your Samsung TV information. SmartThings token is optional but really suggested.\nAfter confirm you should see a popup on your TV asking for authorization."
+        "description": "Enter your Samsung TV information. SmartThings is optional but really suggested.\nAfter confirm you should see a popup on your TV asking for authorization."
       },
       "reconfigure": {
         "data": {
           "host": "Host or IP address",
           "api_key": "SmartThings generated token (optional, if empty will be used the existing)",
-          "use_st_int_api_key": "Use SmartThings credential provided by SmartThings integration"
+          "st_entry_unique_id": "SmartThings entry used to provide SmartThings credential"
         },
         "description": "Enter your Samsung TV information to update. SmartThings configuration can be changed but not removed.\nAfter confirm you should see a popup on your TV asking for authorization."
       },

@@ -74,13 +74,13 @@ from .const import (
     CONF_POWER_ON_METHOD,
     CONF_SHOW_CHANNEL_NR,
     CONF_SOURCE_LIST,
+    CONF_ST_ENTRY_UNIQUE_ID,
     CONF_SYNC_TURN_OFF,
     CONF_SYNC_TURN_ON,
     CONF_TOGGLE_ART_MODE,
     CONF_USE_LOCAL_LOGO,
     CONF_USE_MUTE_CHECK,
     CONF_USE_ST_CHANNEL_INFO,
-    CONF_USE_ST_INT_API_KEY,
     CONF_USE_ST_STATUS_INFO,
     CONF_WOL_REPEAT,
     CONF_WS_NAME,
@@ -328,15 +328,17 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
         self._upnp = SamsungUPnP(host=self._host, session=session)
 
         # smartthings initialization
+        st_entry_uniqueid: str | None = config.get(CONF_ST_ENTRY_UNIQUE_ID)
+
         def api_key_callback() -> str | None:
             """Get new api key and update config entry with the new token."""
-            return self._update_smartthing_token(update_token_func)
+            return self._update_smartthing_token(st_entry_uniqueid, update_token_func)
 
         self._st = None
         self._st_api_key = config.get(CONF_API_KEY)
         device_id = config.get(CONF_DEVICE_ID)
         if self._st_api_key and device_id:
-            use_callbck: bool = config.get(CONF_USE_ST_INT_API_KEY, False)
+            use_callbck: bool = st_entry_uniqueid is not None
             self._st = SmartThingsTV(
                 api_key=self._st_api_key,
                 device_id=device_id,
@@ -367,11 +369,11 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
     @Throttle(ST_API_KEY_UPDATE_INTERVAL)
     @callback
     def _update_smartthing_token(
-        self, update_token_func: Callable[[str, str], None]
+        self, st_unique_id: str, update_token_func: Callable[[str, str], None]
     ) -> str | None:
         """Update the smartthing token when change on native integration."""
         _LOGGER.debug("Trying to update smartthing access token")
-        if not (new_token := get_smartthings_api_key(self.hass)):
+        if not (new_token := get_smartthings_api_key(self.hass, st_unique_id)):
             _LOGGER.warning(
                 "Failed to retrieve SmartThings integration access token,"
                 " using last available"

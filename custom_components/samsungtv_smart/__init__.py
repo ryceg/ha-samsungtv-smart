@@ -55,10 +55,12 @@ from .const import (
     CONF_SCAN_APP_HTTP,
     CONF_SHOW_CHANNEL_NR,
     CONF_SOURCE_LIST,
+    CONF_ST_ENTRY_UNIQUE_ID,
     CONF_SYNC_TURN_OFF,
     CONF_SYNC_TURN_ON,
     CONF_UPDATE_CUSTOM_PING_URL,
     CONF_UPDATE_METHOD,
+    CONF_USE_ST_INT_API_KEY,
     CONF_WS_NAME,
     DATA_CFG,
     DATA_CFG_YAML,
@@ -305,16 +307,51 @@ def _migrate_entry_unique_id(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 @callback
-def get_smartthings_api_key(hass: HomeAssistant) -> str | None:
+def _migrate_smartthings_config(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Migrate smartthings entry usage configuration."""
+    if CONF_ST_ENTRY_UNIQUE_ID in entry.data:
+        return
+    if CONF_USE_ST_INT_API_KEY not in entry.data:
+        return
+
+    new_data = entry.data.copy()
+    use_st = new_data.pop(CONF_USE_ST_INT_API_KEY)
+    if use_st:
+        if entries_list := hass.config_entries.async_entries(ST_DOMAIN, False, False):
+            new_data[CONF_ST_ENTRY_UNIQUE_ID] = entries_list[0].unique_id
+
+    hass.config_entries.async_update_entry(entry, data=new_data)
+
+
+@callback
+def get_smartthings_entries(hass: HomeAssistant) -> dict[str, str] | None:
+    """Get the smartthing integration configured entries."""
+    entries_list = hass.config_entries.async_entries(ST_DOMAIN, False, False)
+    if not entries_list:
+        return None
+
+    return {
+        entry.unique_id: entry.title
+        for entry in entries_list
+        if CONF_TOKEN in entry.data
+    }
+
+
+@callback
+def get_smartthings_api_key(hass: HomeAssistant, st_unique_id: str) -> str | None:
     """Get the smartthing integration configured API key."""
     entries_list = hass.config_entries.async_entries(ST_DOMAIN, False, False)
     if not entries_list:
         return None
 
-    config_data = entries_list[0].data
-    if CONF_TOKEN not in config_data:
-        return None
-    return config_data[CONF_TOKEN].get(CONF_ACCESS_TOKEN)
+    for entry in entries_list:
+        if entry.unique_id == st_unique_id:
+            config_data = entry.data
+            if CONF_TOKEN not in config_data:
+                return None
+            return config_data[CONF_TOKEN].get(CONF_ACCESS_TOKEN)
+
+    return None
 
 
 async def _register_logo_paths(hass: HomeAssistant) -> str | None:
@@ -552,6 +589,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # migrate unique id to a accepted format
     _migrate_entry_unique_id(hass, entry)
+
+    # migrate smartthings entry usage configuration
+    _migrate_smartthings_config(hass, entry)
 
     # migrate old token file to registry entry if required
     if CONF_TOKEN not in entry.data:

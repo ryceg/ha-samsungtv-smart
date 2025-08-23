@@ -27,15 +27,15 @@
           "name": "Nome dell'entit\u00e0",
           "use_ha_name_for_ws": "Usare il nome dell'istanza HA per identificarsi sulla TV",
           "api_key": "SmartThings token generato (opzionale)",
-          "use_st_int_api_key": "Usa credenziali SmartThings fornite dall'integrazione SmartThings"
+          "st_entry_unique_id": "Entry SmartThings usata per fornire le credenziali SmartThings"
         },
-        "description": "Inserisci le informazioni del tuo Samsung TV. Il token SmartThings \u00e8 opzionale ma fortemente consigliato.\nDopo aver confermato i dati, dovresti vedere un messaggio sul TV in cui \u00e8 richiesta l'autorizzazione."
+        "description": "Inserisci le informazioni del tuo Samsung TV. L'uso di SmartThings \u00e8 opzionale ma fortemente consigliato.\nDopo aver confermato i dati, dovresti vedere un messaggio sul TV in cui \u00e8 richiesta l'autorizzazione."
       },
       "reconfigure": {
         "data": {
           "host": "Host o indirizzo IP",
           "api_key": "SmartThings token generato (opzionale, se vuoto verrà usato quello esistente)",
-          "use_st_int_api_key": "Usa credenziali SmartThings fornite dall'integrazione SmartThings"
+          "st_entry_unique_id": "Entry SmartThings usata per fornire le credenziali SmartThings"
         },
         "description": "Inserisci le informazioni da aggiornare del tuo Samsung TV. Le configurazioni SmartThings possono essere cambiate ma non rimosse.\nDopo aver confermato i dati, dovresti vedere un messaggio sul TV in cui \u00e8 richiesta l'autorizzazione."
       },
