@@ -168,6 +168,7 @@ class SmartThingsTV:
         self._sound_mode_list = None
         self._picture_mode = None
         self._picture_mode_list = None
+        self._playback_status = None
 
         self._is_forced_val = False
         self._forced_count = 0
@@ -269,6 +270,13 @@ class SmartThingsTV:
         if self._state != STStatus.STATE_ON:
             return None
         return self._picture_mode_list
+
+    @property
+    def playback_status(self):
+        """Return current playback status."""
+        if self._state != STStatus.STATE_ON:
+            return "unknown"
+        return self._playback_status or "unknown"
 
     def get_source_name(self, source_id: str) -> str:
         """Get source name based on source id."""
@@ -502,6 +510,21 @@ class SmartThingsTV:
         self._picture_mode_list = self._load_json_list(
             dev_data, "supportedPictureModes"
         )
+
+        # Playback Status
+        # Try different possible attribute paths
+        playback_status_direct = dev_data.get("playbackStatus", {}).get("value")
+        playback_status_media = dev_data.get("mediaPlayback", {}).get("playbackStatus", {}).get("value")
+        playback_status_audio = dev_data.get("audioPlaybackStatus", {}).get("value")
+        
+        _LOGGER.debug("Playback status attempts - direct: %s, mediaPlayback: %s, audioPlaybackStatus: %s", 
+                     playback_status_direct, playback_status_media, playback_status_audio)
+        _LOGGER.debug("Available dev_data keys: %s", list(dev_data.keys()))
+        
+        # Use the first non-None value found
+        self._playback_status = (playback_status_direct or 
+                                playback_status_media or 
+                                playback_status_audio)
 
         # Sources and channel
         self._source_list_map = self._load_json_list(
