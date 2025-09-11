@@ -169,6 +169,15 @@ class SmartThingsTV:
         self._picture_mode = None
         self._picture_mode_list = None
         self._playback_status = None
+        self._power_consumption = None
+        self._energy = None
+
+        # Art mode attributes
+        self._art_mode = False
+        self._current_artwork = None
+        self._art_brightness = None
+        self._art_matting = None
+        self._art_sleep_timer = None
 
         self._is_forced_val = False
         self._forced_count = 0
@@ -277,6 +286,55 @@ class SmartThingsTV:
         if self._state != STStatus.STATE_ON:
             return "unknown"
         return self._playback_status or "unknown"
+
+    @property
+    def power_consumption(self):
+        """Return current power consumption in watts."""
+        if self._state != STStatus.STATE_ON:
+            return None
+        return self._power_consumption
+
+    @property
+    def energy(self):
+        """Return current energy consumption in kWh."""
+        if self._state != STStatus.STATE_ON:
+            return None
+        return self._energy
+
+    @property
+    def art_mode(self) -> bool:
+        """Return True if TV is in art mode."""
+        return self._art_mode
+
+    @property
+    def current_artwork(self) -> str | None:
+        """Return current artwork name."""
+        return self._current_artwork
+
+    @property
+    def art_brightness(self) -> int | None:
+        """Return art mode brightness level."""
+        return self._art_brightness
+
+    @property
+    def art_matting(self) -> str | None:
+        """Return art mode matting style."""
+        return self._art_matting
+
+    @property
+    def art_sleep_timer(self) -> int | None:
+        """Return art mode sleep timer in minutes."""
+        return self._art_sleep_timer
+
+    @property
+    def tv_status(self) -> str:
+        """Return TV status: off, on, or art."""
+        if self._state == STStatus.STATE_OFF:
+            return "off"
+        elif self._art_mode:
+            return "art"
+        else:
+            return "on"
 
     def get_source_name(self, source_id: str) -> str:
         """Get source name based on source id."""
@@ -516,15 +574,95 @@ class SmartThingsTV:
         playback_status_direct = dev_data.get("playbackStatus", {}).get("value")
         playback_status_media = dev_data.get("mediaPlayback", {}).get("playbackStatus", {}).get("value")
         playback_status_audio = dev_data.get("audioPlaybackStatus", {}).get("value")
-        
-        _LOGGER.debug("Playback status attempts - direct: %s, mediaPlayback: %s, audioPlaybackStatus: %s", 
+
+        _LOGGER.debug("Playback status attempts - direct: %s, mediaPlayback: %s, audioPlaybackStatus: %s",
                      playback_status_direct, playback_status_media, playback_status_audio)
         _LOGGER.debug("Available dev_data keys: %s", list(dev_data.keys()))
-        
+
         # Use the first non-None value found
-        self._playback_status = (playback_status_direct or 
-                                playback_status_media or 
+        self._playback_status = (playback_status_direct or
+                                playback_status_media or
                                 playback_status_audio)
+
+        # Power consumption and energy
+        power_data = dev_data.get("powerConsumptionReport", {})
+        if power_data:
+            power_value_obj = power_data.get("value", {})
+            if power_value_obj:
+                # Power consumption in watts
+                power_value = power_value_obj.get("power")
+                if power_value is not None:
+                    try:
+                        self._power_consumption = float(power_value)
+                    except (ValueError, TypeError):
+                        self._power_consumption = None
+
+                # Energy consumption - use deltaEnergy for consumption since last reading
+                # Convert from Wh to kWh
+                energy_value = power_value_obj.get("deltaEnergy")
+                if energy_value is not None:
+                    try:
+                        self._energy = float(energy_value) / 1000  # Convert Wh to kWh
+                    except (ValueError, TypeError):
+                        self._energy = None
+        else:
+            # Try alternative power consumption attributes
+            power_meter = dev_data.get("powerMeter", {}).get("value")
+            energy_meter = dev_data.get("energyMeter", {}).get("value")
+
+            if power_meter is not None:
+                try:
+                    self._power_consumption = float(power_meter)
+                except (ValueError, TypeError):
+                    self._power_consumption = None
+
+            if energy_meter is not None:
+                try:
+                    self._energy = float(energy_meter) / 1000  # Convert Wh to kWh
+                except (ValueError, TypeError):
+                    self._energy = None
+
+        # Art mode information
+        art_mode_data = dev_data.get("custom.artMode", {})
+        if art_mode_data:
+            # Art mode status
+            art_mode_value = art_mode_data.get("artModeStatus", {}).get("value")
+            self._art_mode = art_mode_value == "on" if art_mode_value else False
+
+            # Current artwork
+            current_art = art_mode_data.get("artworkName", {}).get("value")
+            self._current_artwork = current_art if current_art else None
+
+            # Art settings
+            brightness = art_mode_data.get("artModeBrightness", {}).get("value")
+            if brightness is not None:
+                try:
+                    self._art_brightness = int(brightness)
+                except (ValueError, TypeError):
+                    self._art_brightness = None
+
+            matting = art_mode_data.get("artModeMatting", {}).get("value")
+            self._art_matting = matting if matting else None
+
+            sleep_timer = art_mode_data.get("artModeSleepTimer", {}).get("value")
+            if sleep_timer is not None:
+                try:
+                    self._art_sleep_timer = int(sleep_timer)
+                except (ValueError, TypeError):
+                    self._art_sleep_timer = None
+        else:
+            # Try alternative art mode attribute paths
+            art_status = dev_data.get("artModeStatus", {}).get("value")
+            self._art_mode = art_status == "on" if art_status else False
+
+            artwork_name = dev_data.get("artworkName", {}).get("value")
+            self._current_artwork = artwork_name if artwork_name else None
+
+            # Reset art settings if no art mode data
+            if not art_status:
+                self._art_brightness = None
+                self._art_matting = None
+                self._art_sleep_timer = None
 
         # Sources and channel
         self._source_list_map = self._load_json_list(

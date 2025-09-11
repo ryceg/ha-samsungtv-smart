@@ -95,6 +95,9 @@ from .const import (
     MAX_WOL_REPEAT,
     SERVICE_SELECT_PICTURE_MODE,
     SERVICE_SET_ART_MODE,
+    SERVICE_SELECT_ARTWORK,
+    SERVICE_CONFIGURE_ART_SETTINGS,
+    SERVICE_SET_SLIDESHOW,
     SIGNAL_CONFIG_ENTITY,
     STD_APP_LIST,
     WS_PREFIX,
@@ -108,6 +111,13 @@ from .logo import LOGO_OPTION_DEFAULT, LocalImageUrl, Logo, LogoOption
 ATTR_ART_MODE_STATUS = "art_mode_status"
 ATTR_IP_ADDRESS = "ip_address"
 ATTR_PICTURE_MODE = "picture_mode"
+ATTR_ENABLED = "enabled"
+ATTR_CONTENT_ID = "content_id"
+ATTR_CATEGORY = "category"
+ATTR_BRIGHTNESS = "brightness"
+ATTR_MATTING_STYLE = "matting_style"
+ATTR_SLEEP_TIMER = "sleep_timer"
+ATTR_DURATION_MINUTES = "duration_minutes"
 ATTR_PICTURE_MODE_LIST = "picture_mode_list"
 
 CMD_OPEN_BROWSER = "open_browser"
@@ -200,8 +210,33 @@ async def async_setup_entry(
     )
     platform.async_register_entity_service(
         SERVICE_SET_ART_MODE,
-        {},
+        {vol.Required(ATTR_ENABLED): cv.boolean},
         "async_set_art_mode",
+    )
+    platform.async_register_entity_service(
+        SERVICE_SELECT_ARTWORK,
+        {
+            vol.Required(ATTR_CONTENT_ID): cv.string,
+            vol.Optional(ATTR_CATEGORY): cv.string,
+        },
+        "async_select_artwork",
+    )
+    platform.async_register_entity_service(
+        SERVICE_CONFIGURE_ART_SETTINGS,
+        {
+            vol.Optional(ATTR_BRIGHTNESS): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+            vol.Optional(ATTR_MATTING_STYLE): cv.string,
+            vol.Optional(ATTR_SLEEP_TIMER): vol.All(vol.Coerce(int), vol.Range(min=0, max=1440)),
+        },
+        "async_configure_art_settings",
+    )
+    platform.async_register_entity_service(
+        SERVICE_SET_SLIDESHOW,
+        {
+            vol.Required(ATTR_ENABLED): cv.boolean,
+            vol.Optional(ATTR_DURATION_MINUTES): vol.All(vol.Coerce(int), vol.Range(min=1, max=1440)),
+        },
+        "async_set_slideshow",
     )
 
 
@@ -1255,15 +1290,27 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
         """Turn the media player on."""
         await self._async_turn_on()
 
-    async def async_set_art_mode(self):
-        """Turn the media player on setting in art mode."""
-        if (
-            self._state == MediaPlayerState.ON
-            and self.support_art_mode == ArtModeSupport.PARTIAL
-        ):
-            await self.async_send_command("KEY_POWER")
-        elif self.support_art_mode == ArtModeSupport.FULL:
-            await self._async_turn_on(True)
+    async def async_set_art_mode(self, enabled: bool = True):
+        """Enable or disable art mode via WebSocket or fallback methods."""
+        # Try WebSocket art mode control first
+        if self._ws and self._ws.artmode_status != ArtModeStatus.Unsupported:
+            success = self._ws.set_artmode(enabled)
+            if success:
+                return
+        
+        # Fallback to existing logic for partial art mode support
+        if enabled:
+            if (
+                self._state == MediaPlayerState.ON
+                and self.support_art_mode == ArtModeSupport.PARTIAL
+            ):
+                await self.async_send_command("KEY_POWER")
+            elif self.support_art_mode == ArtModeSupport.FULL:
+                await self._async_turn_on(True)
+        else:
+            # To disable art mode, turn TV on normally
+            if self._state != MediaPlayerState.ON:
+                await self._async_turn_on()
 
     def _turn_off(self):
         """Turn off media player."""
@@ -1698,6 +1745,48 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
         if not self._st:
             raise NotImplementedError()
         await self._st.async_set_picture_mode(picture_mode)
+
+    async def async_select_artwork(self, content_id: str, category: str = None):
+        """Select and display specific artwork."""
+        if not self._ws or self._ws.artmode_status == ArtModeStatus.Unsupported:
+            raise NotImplementedError("Art mode WebSocket not available")
+        
+        success = self._ws.select_artwork(content_id, category)
+        if not success:
+            raise RuntimeError(f"Failed to select artwork: {content_id}")
+
+    async def async_configure_art_settings(
+        self, 
+        brightness: int = None, 
+        matting_style: str = None, 
+        sleep_timer: int = None
+    ):
+        """Configure art mode settings."""
+        if not self._ws or self._ws.artmode_status == ArtModeStatus.Unsupported:
+            raise NotImplementedError("Art mode WebSocket not available")
+        
+        success = True
+        
+        if brightness is not None:
+            success &= self._ws.set_art_brightness(brightness)
+        
+        if matting_style is not None:
+            success &= self._ws.set_art_matting(matting_style)
+        
+        if sleep_timer is not None:
+            success &= self._ws.set_art_sleep_timer(sleep_timer)
+        
+        if not success:
+            raise RuntimeError("Failed to configure one or more art settings")
+
+    async def async_set_slideshow(self, enabled: bool, duration_minutes: int = None):
+        """Configure artwork slideshow/rotation."""
+        if not self._ws or self._ws.artmode_status == ArtModeStatus.Unsupported:
+            raise NotImplementedError("Art mode WebSocket not available")
+        
+        success = self._ws.set_slideshow(enabled, duration_minutes)
+        if not success:
+            raise RuntimeError("Failed to configure slideshow settings")
 
     async def _async_switch_entity(self, power_on: bool):
         """Switch on/off related configure HA entity."""

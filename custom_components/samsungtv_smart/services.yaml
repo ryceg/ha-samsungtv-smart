@@ -21,7 +21,7 @@ select_picture_mode:
 
 set_art_mode:
   name: Set Art Mode
-  description: Send to samsung TV the command to set art mode.
+  description: Enable or disable art mode on Samsung Frame TV.
   fields:
     entity_id:
       name: Entity Name
@@ -31,3 +31,115 @@ set_art_mode:
       selector:
         entity:
           integration: samsungtv_smart
+    enabled:
+      name: Enable Art Mode
+      description: Whether to enable or disable art mode
+      required: true
+      default: true
+      selector:
+        boolean:
+
+select_artwork:
+  name: Select Artwork
+  description: Select and display specific artwork on Samsung Frame TV.
+  fields:
+    entity_id:
+      name: Entity Name
+      description: Name of the target entity
+      required: true
+      example: "media_player.tv"
+      selector:
+        entity:
+          integration: samsungtv_smart
+    content_id:
+      name: Artwork Content ID
+      description: The ID of the artwork to display
+      required: true
+      example: "MY_F002_000001"
+      selector:
+        text:
+    category:
+      name: Category
+      description: Optional category filter for the artwork
+      required: false
+      example: "MY-C0002"
+      selector:
+        text:
+
+configure_art_settings:
+  name: Configure Art Settings
+  description: Adjust art mode display settings on Samsung Frame TV.
+  fields:
+    entity_id:
+      name: Entity Name
+      description: Name of the target entity
+      required: true
+      example: "media_player.tv"
+      selector:
+        entity:
+          integration: samsungtv_smart
+    brightness:
+      name: Brightness
+      description: Art mode brightness (0-100)
+      required: false
+      example: 50
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    matting_style:
+      name: Matting Style
+      description: Frame matting style for the artwork
+      required: false
+      example: "shadowbox_polar"
+      selector:
+        select:
+          options:
+            - "shadowbox_polar"
+            - "shadowbox_black"
+            - "shadowbox_white"
+            - "modern_black"
+            - "modern_white"
+            - "beveled_black"
+            - "beveled_white"
+    sleep_timer:
+      name: Sleep Timer
+      description: Art mode sleep timer in minutes (0 to disable)
+      required: false
+      example: 60
+      selector:
+        number:
+          min: 0
+          max: 1440
+          unit_of_measurement: "minutes"
+
+set_slideshow:
+  name: Set Slideshow
+  description: Configure artwork slideshow/rotation on Samsung Frame TV.
+  fields:
+    entity_id:
+      name: Entity Name
+      description: Name of the target entity
+      required: true
+      example: "media_player.tv"
+      selector:
+        entity:
+          integration: samsungtv_smart
+    enabled:
+      name: Enable Slideshow
+      description: Whether to enable or disable slideshow
+      required: true
+      default: false
+      selector:
+        boolean:
+    duration_minutes:
+      name: Duration
+      description: Time between artwork changes in minutes
+      required: false
+      example: 30
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: "minutes"

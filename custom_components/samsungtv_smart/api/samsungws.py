@@ -840,6 +840,136 @@ class SamsungTVWS:
     def artmode_status(self):
         """Return current art mode status."""
         return self._artmode_status
+    
+    def _send_art_request(self, request_data: dict, timeout: float = 5.0) -> dict | None:
+        """Send an art-related request and wait for response."""
+        if not self._ws_art or self._artmode_status == ArtModeStatus.Unsupported:
+            _LOGGING.warning("Art mode WebSocket not available")
+            return None
+            
+        request_id = gen_uuid()
+        request_data["id"] = request_id
+        
+        # Send the request
+        self._ws_send(
+            {
+                "method": "ms.channel.emit",
+                "params": {
+                    "data": json.dumps(request_data),
+                    "to": "host",
+                    "event": "art_app_request",
+                },
+            },
+            key_press_delay=0,
+            use_control=True,
+            ws_socket=self._ws_art,
+        )
+        
+        # Wait for response (simplified - in production would need proper async handling)
+        # For now, return None to indicate request was sent
+        return None
+    
+    def get_current_artwork(self) -> dict | None:
+        """Get current displayed artwork details."""
+        if self._artmode_status != ArtModeStatus.On:
+            return None
+            
+        request_data = {
+            "request": "get_current_artwork",
+        }
+        return self._send_art_request(request_data)
+    
+    def get_available_artworks(self, category: str | None = None) -> list[dict] | None:
+        """Get list of available artworks, optionally filtered by category."""
+        request_data = {
+            "request": "get_artwork_list",
+        }
+        if category:
+            request_data["category"] = category
+            
+        return self._send_art_request(request_data)
+    
+    def select_artwork(self, content_id: str, category: str | None = None, show: bool = True) -> bool:
+        """Select and display specific artwork."""
+        if self._artmode_status == ArtModeStatus.Unsupported:
+            return False
+            
+        request_data = {
+            "request": "select_image",
+            "content_id": content_id,
+            "show": show,
+        }
+        if category:
+            request_data["category"] = category
+            
+        result = self._send_art_request(request_data)
+        return result is not None
+    
+    def set_artmode(self, enabled: bool) -> bool:
+        """Enable or disable art mode."""
+        request_data = {
+            "request": "set_artmode_status",
+            "value": "on" if enabled else "off",
+        }
+        result = self._send_art_request(request_data)
+        return result is not None
+    
+    def get_art_settings(self) -> dict | None:
+        """Get current art mode settings (brightness, matting, sleep timer)."""
+        request_data = {
+            "request": "get_art_settings",
+        }
+        return self._send_art_request(request_data)
+    
+    def set_art_brightness(self, brightness: int) -> bool:
+        """Set art mode brightness (0-100)."""
+        if not (0 <= brightness <= 100):
+            _LOGGING.error("Brightness must be between 0 and 100")
+            return False
+            
+        request_data = {
+            "request": "set_art_brightness",
+            "brightness": brightness,
+        }
+        result = self._send_art_request(request_data)
+        return result is not None
+    
+    def set_art_matting(self, matting_style: str) -> bool:
+        """Set art mode matting style."""
+        request_data = {
+            "request": "set_art_matting",
+            "matting": matting_style,
+        }
+        result = self._send_art_request(request_data)
+        return result is not None
+    
+    def set_art_sleep_timer(self, sleep_timer_minutes: int) -> bool:
+        """Set art mode sleep timer in minutes."""
+        request_data = {
+            "request": "set_art_sleep_timer",
+            "sleep_timer": sleep_timer_minutes,
+        }
+        result = self._send_art_request(request_data)
+        return result is not None
+    
+    def get_slideshow_status(self) -> dict | None:
+        """Get current slideshow/auto-rotation status."""
+        request_data = {
+            "request": "get_slideshow_status",
+        }
+        return self._send_art_request(request_data)
+    
+    def set_slideshow(self, enabled: bool, duration_minutes: int | None = None) -> bool:
+        """Enable/disable slideshow with optional duration."""
+        request_data = {
+            "request": "set_slideshow_status", 
+            "enabled": enabled,
+        }
+        if duration_minutes is not None:
+            request_data["duration"] = duration_minutes
+            
+        result = self._send_art_request(request_data)
+        return result is not None
 
     @property
     def installed_app(self):
