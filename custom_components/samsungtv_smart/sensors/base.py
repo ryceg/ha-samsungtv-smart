@@ -127,15 +127,14 @@ class SamsungTVArtSensorBase(SamsungTVSensorBase):
     def art_mode_supported(self) -> bool:
         """Return True if art mode is supported."""
         if self._ws:
-            return self._ws.artmode_status != ArtModeStatus.Unsupported
+            return self._ws.art().supported()
         return False
 
     @property
     def art_mode_active(self) -> bool:
         """Return True if TV is currently in art mode."""
         if self._ws:
-            return self._ws.artmode_status == ArtModeStatus.On
-        # Fallback to SmartThings if available
+            return self._ws.art().get_artmode()
         if self._st:
             return self._st.art_mode
         return False
@@ -157,21 +156,21 @@ class SamsungTVArtSensorBase(SamsungTVSensorBase):
 
     def get_current_artwork(self) -> dict | None:
         """Get current artwork details via WebSocket."""
-        if not self._ws or not self.art_mode_active:
+        if not self._ws or not self.art_mode_supported:
             return None
-        return self._ws.get_current_artwork()
+        return self._ws.art().get_current()
 
-    def get_available_artworks(self, category: str | None = None) -> list[dict] | None:
+    def get_available_artworks(self) -> list[dict] | None:
         """Get available artworks via WebSocket."""
         if not self._ws or not self.art_mode_supported:
             return None
-        return self._ws.get_available_artworks(category)
+        return self._ws.art().available()
 
-    def select_artwork(self, content_id: str, category: str | None = None) -> bool:
+    def select_artwork(self, content_id: str) -> bool:
         """Select artwork via WebSocket."""
         if not self._ws or not self.art_mode_supported:
             return False
-        return self._ws.select_artwork(content_id, category)
+        return self._ws.art().select_image(content_id, show=True)
 
     def get_art_settings(self) -> dict | None:
         """Get art mode settings via WebSocket."""
@@ -184,3 +183,44 @@ class SamsungTVArtSensorBase(SamsungTVSensorBase):
         if not self._ws or not self.art_mode_supported:
             return None
         return self._ws.get_slideshow_status()
+    
+    def _extract_image_urls(self, artwork_data: dict) -> dict[str, str]:
+        """Extract image URLs from artwork data."""
+        image_urls = {}
+        
+        # Most likely image field names based on common API patterns
+        image_fields = [
+            # Primary image fields
+            'image_url', 'imageUrl', 'image', 'url',
+            # Thumbnail fields
+            'thumbnail_url', 'thumbnailUrl', 'thumbnail', 'thumb',
+            # Alternative naming patterns
+            'picture_url', 'pictureUrl', 'photo_url', 'photoUrl',
+            'file_url', 'fileUrl', 'content_url', 'contentUrl'
+        ]
+        
+        for field in image_fields:
+            if field in artwork_data:
+                value = artwork_data[field]
+                if value and isinstance(value, str):
+                    # Check if it looks like a URL or base64 data
+                    if (value.startswith(('http://', 'https://', 'data:')) or
+                        (value.startswith('/') and len(value) > 5) or  # Relative path
+                        len(value) > 100):  # Likely base64 encoded image
+                        image_urls[field] = value
+        
+        # Check nested objects for image data (one level deep only)
+        for key, value in artwork_data.items():
+            if isinstance(value, dict):
+                nested_images = self._extract_image_urls(value)
+                for nested_key, nested_value in nested_images.items():
+                    image_urls[f"{key}.{nested_key}"] = nested_value
+        
+        return image_urls
+    
+    def download_artwork_thumbnail(self, content_id: str) -> bytes | None:
+        """Download artwork thumbnail via WebSocket."""
+        if not self._ws or not self.art_mode_supported:
+            return None
+        return self._ws.download_artwork_thumbnail(content_id)
+    

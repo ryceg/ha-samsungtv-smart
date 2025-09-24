@@ -31,10 +31,32 @@ class SamsungTVPowerConsumptionSensor(SamsungTVSensorBase):
     @property
     def native_value(self) -> float | None:
         """Return the state of the sensor."""
-        if not self._st or self._st.state != STStatus.STATE_ON:
+        if not self._st:
             return None
         
         return self._st.power_consumption
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return self._st is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the state attributes."""
+        if not self._st:
+            return {}
+        
+        attributes = {
+            "tv_state": self._st.state,
+            "smartthings_device_id": self._st._device_id,
+        }
+        
+        # Add raw power data for debugging
+        if hasattr(self._st, '_power_consumption'):
+            attributes["raw_power_value"] = self._st._power_consumption
+            
+        return attributes
 
 
 class SamsungTVEnergyConsumptionSensor(SamsungTVSensorBase):
@@ -56,7 +78,29 @@ class SamsungTVEnergyConsumptionSensor(SamsungTVSensorBase):
     @property
     def native_value(self) -> float | None:
         """Return the state of the sensor."""
-        if not self._st or self._st.state != STStatus.STATE_ON:
+        if not self._st:
             return None
         
         return self._st.energy
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return self._st is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the state attributes."""
+        if not self._st:
+            return {}
+        
+        attributes = {
+            "tv_state": self._st.state,
+            "smartthings_device_id": self._st._device_id,
+        }
+        
+        # Add raw energy data for debugging
+        if hasattr(self._st, '_energy'):
+            attributes["raw_energy_value"] = self._st._energy
+            
+        return attributes

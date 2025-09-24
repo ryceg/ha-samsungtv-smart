@@ -378,6 +378,27 @@ class SmartThingsTV:
             self._is_forced_val = True
             self._forced_count = 0
 
+    def _validate_power_capabilities(self, dev_data: dict) -> None:
+        """Validate PAT token has access to power consumption capabilities."""
+        power_capabilities = [
+            "powerConsumption",
+            "powerConsumptionReport",
+            "powerMeter", 
+            "energyMeter"
+        ]
+        
+        available_power_caps = [cap for cap in power_capabilities if cap in dev_data]
+        missing_power_caps = [cap for cap in power_capabilities if cap not in dev_data]
+        
+        if available_power_caps:
+            _LOGGER.debug("PAT token has access to power capabilities: %s", available_power_caps)
+        
+        if missing_power_caps:
+            _LOGGER.info("PAT token missing access to power capabilities: %s. This may be normal if your TV doesn't support these features or if the PAT token lacks permissions.", missing_power_caps)
+            
+        if not available_power_caps:
+            _LOGGER.warning("PAT token has no access to any power consumption capabilities (%s). Power consumption sensors will not work. Check your SmartThings PAT token permissions.", power_capabilities)
+
     @staticmethod
     def _load_json_list(dev_data, list_name):
         """Try load a list from string to json format."""
@@ -546,6 +567,9 @@ class SmartThingsTV:
         _LOGGER.debug(data)
 
         dev_data = data.get("main", {})
+        
+        # Check for power consumption capability access
+        self._validate_power_capabilities(dev_data)
         # device_state = data['main']['switch']['value']
 
         # Volume
@@ -585,41 +609,131 @@ class SmartThingsTV:
                                 playback_status_audio)
 
         # Power consumption and energy
-        power_data = dev_data.get("powerConsumptionReport", {})
-        if power_data:
-            power_value_obj = power_data.get("value", {})
-            if power_value_obj:
-                # Power consumption in watts
-                power_value = power_value_obj.get("power")
-                if power_value is not None:
-                    try:
-                        self._power_consumption = float(power_value)
-                    except (ValueError, TypeError):
+        _LOGGER.debug("Parsing power consumption data for device %s", self._device_id)
+        _LOGGER.debug("Available power-related capabilities: %s", [key for key in dev_data.keys() if 'power' in key.lower() or 'energy' in key.lower()])
+        
+        # First try the newer powerConsumption format (used by newer Samsung TVs)
+        power_consumption_data = dev_data.get("powerConsumption", {})
+        _LOGGER.debug("powerConsumption raw data: %s", power_consumption_data)
+        
+        if power_consumption_data and "value" in power_consumption_data:
+            power_value_str = power_consumption_data.get("value")
+            _LOGGER.debug("powerConsumption value string: %s", power_value_str)
+            
+            if power_value_str:
+                try:
+                    # Parse the JSON string
+                    power_data_parsed = json.loads(power_value_str)
+                    _LOGGER.debug("Parsed powerConsumption JSON: %s", power_data_parsed)
+                    
+                    # Extract power value (in watts)
+                    power_value = power_data_parsed.get("power")
+                    if power_value is not None:
+                        try:
+                            self._power_consumption = float(power_value)
+                            _LOGGER.debug("Successfully parsed power consumption: %s W", self._power_consumption)
+                        except (ValueError, TypeError) as e:
+                            _LOGGER.warning("Failed to parse power value '%s': %s", power_value, e)
+                            self._power_consumption = None
+                    else:
+                        _LOGGER.debug("Power value is None in powerConsumption")
+                        self._power_consumption = None
+                    
+                    # Extract energy value (deltaEnergy in Wh, convert to kWh)
+                    energy_value = power_data_parsed.get("deltaEnergy")
+                    if energy_value is not None:
+                        try:
+                            self._energy = float(energy_value) / 1000  # Convert Wh to kWh
+                            _LOGGER.debug("Successfully parsed energy consumption: %s kWh", self._energy)
+                        except (ValueError, TypeError) as e:
+                            _LOGGER.warning("Failed to parse energy value '%s': %s", energy_value, e)
+                            self._energy = None
+                    else:
+                        _LOGGER.debug("deltaEnergy value is None in powerConsumption")
+                        self._energy = None
+                        
+                except json.JSONDecodeError as e:
+                    _LOGGER.warning("Failed to parse powerConsumption JSON string '%s': %s", power_value_str, e)
+                    self._power_consumption = None
+                    self._energy = None
+            else:
+                _LOGGER.debug("powerConsumption value string is empty")
+                self._power_consumption = None
+                self._energy = None
+        else:
+            _LOGGER.debug("powerConsumption capability not found, trying legacy powerConsumptionReport")
+            
+            # Try legacy powerConsumptionReport format
+            power_data = dev_data.get("powerConsumptionReport", {})
+            _LOGGER.debug("powerConsumptionReport raw data: %s", power_data)
+            
+            if power_data:
+                power_value_obj = power_data.get("value", {})
+                _LOGGER.debug("powerConsumptionReport value object: %s", power_value_obj)
+                
+                if power_value_obj:
+                    # Power consumption in watts
+                    power_value = power_value_obj.get("power")
+                    _LOGGER.debug("Extracted power value: %s", power_value)
+                    
+                    if power_value is not None:
+                        try:
+                            self._power_consumption = float(power_value)
+                            _LOGGER.debug("Successfully parsed power consumption: %s W", self._power_consumption)
+                        except (ValueError, TypeError) as e:
+                            _LOGGER.warning("Failed to parse power value '%s': %s", power_value, e)
+                            self._power_consumption = None
+                    else:
+                        _LOGGER.debug("Power value is None in powerConsumptionReport")
                         self._power_consumption = None
 
-                # Energy consumption - use deltaEnergy for consumption since last reading
-                # Convert from Wh to kWh
-                energy_value = power_value_obj.get("deltaEnergy")
-                if energy_value is not None:
-                    try:
-                        self._energy = float(energy_value) / 1000  # Convert Wh to kWh
-                    except (ValueError, TypeError):
+                    # Energy consumption - use deltaEnergy for consumption since last reading
+                    # Convert from Wh to kWh
+                    energy_value = power_value_obj.get("deltaEnergy")
+                    _LOGGER.debug("Extracted deltaEnergy value: %s", energy_value)
+                    
+                    if energy_value is not None:
+                        try:
+                            self._energy = float(energy_value) / 1000  # Convert Wh to kWh
+                            _LOGGER.debug("Successfully parsed energy consumption: %s kWh", self._energy)
+                        except (ValueError, TypeError) as e:
+                            _LOGGER.warning("Failed to parse energy value '%s': %s", energy_value, e)
+                            self._energy = None
+                    else:
+                        _LOGGER.debug("deltaEnergy value is None in powerConsumptionReport")
                         self._energy = None
-        else:
-            # Try alternative power consumption attributes
-            power_meter = dev_data.get("powerMeter", {}).get("value")
-            energy_meter = dev_data.get("energyMeter", {}).get("value")
+                else:
+                    _LOGGER.debug("powerConsumptionReport value object is empty")
+                    self._power_consumption = None
+                    self._energy = None
+            else:
+                _LOGGER.debug("powerConsumptionReport capability not found, trying alternative methods")
+                
+                # Try alternative power consumption attributes
+                power_meter = dev_data.get("powerMeter", {}).get("value")
+                energy_meter = dev_data.get("energyMeter", {}).get("value")
+                
+                _LOGGER.debug("Alternative powerMeter value: %s", power_meter)
+                _LOGGER.debug("Alternative energyMeter value: %s", energy_meter)
 
-            if power_meter is not None:
-                try:
-                    self._power_consumption = float(power_meter)
-                except (ValueError, TypeError):
+                if power_meter is not None:
+                    try:
+                        self._power_consumption = float(power_meter)
+                        _LOGGER.debug("Successfully parsed power from powerMeter: %s W", self._power_consumption)
+                    except (ValueError, TypeError) as e:
+                        _LOGGER.warning("Failed to parse powerMeter value '%s': %s", power_meter, e)
+                        self._power_consumption = None
+                else:
                     self._power_consumption = None
 
-            if energy_meter is not None:
-                try:
-                    self._energy = float(energy_meter) / 1000  # Convert Wh to kWh
-                except (ValueError, TypeError):
+                if energy_meter is not None:
+                    try:
+                        self._energy = float(energy_meter) / 1000  # Convert Wh to kWh
+                        _LOGGER.debug("Successfully parsed energy from energyMeter: %s kWh", self._energy)
+                    except (ValueError, TypeError) as e:
+                        _LOGGER.warning("Failed to parse energyMeter value '%s': %s", energy_meter, e)
+                        self._energy = None
+                else:
                     self._energy = None
 
         # Art mode information

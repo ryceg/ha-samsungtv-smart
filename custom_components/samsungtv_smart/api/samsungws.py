@@ -296,6 +296,10 @@ class SamsungTVWS:
         self._client_art = None
         self._last_art_ping = datetime.min
         self._client_art_supported = 2
+        
+        # Art request response handling
+        self._pending_art_request = None
+        self._art_response = None
 
         self._ping = Ping(self.host)
         self._status_callback = None
@@ -766,6 +770,7 @@ class SamsungTVWS:
                 return
             _LOGGING.debug("Message art: received connect")
             self._client_art_supported = 1
+            self._get_artmode_status()
         elif event == "ms.channel.ready":
             _LOGGING.debug("Message art: channel ready")
             self._get_artmode_status()
@@ -795,12 +800,26 @@ class SamsungTVWS:
         )
 
     def _handle_artmode_status(self, response):
-        """Handle received art mode status."""
+        """Handle received art mode status and art responses."""
         data_str = response.get("data")
         if not data_str:
             return
         data = _process_api_response(data_str)
         event = data.get("event", "")
+        
+        # Check if this is a response to a pending art request
+        if self._pending_art_request and event in [
+            "get_current_artwork",
+            "get_artwork_list", 
+            "get_art_settings",
+            "get_slideshow_status"
+        ]:
+            # Extract and store the response
+            self._art_response = data
+            _LOGGING.debug("Received art response for event: %s", event)
+            return
+        
+        # Handle art mode status events
         if event == "art_mode_changed":
             status = data.get("status", "")
             if status == "on":
@@ -850,6 +869,10 @@ class SamsungTVWS:
         request_id = gen_uuid()
         request_data["id"] = request_id
         
+        # Store the request ID to match response
+        self._pending_art_request = request_id
+        self._art_response = None
+        
         # Send the request
         self._ws_send(
             {
@@ -865,8 +888,20 @@ class SamsungTVWS:
             ws_socket=self._ws_art,
         )
         
-        # Wait for response (simplified - in production would need proper async handling)
-        # For now, return None to indicate request was sent
+        # Wait for response with timeout
+        import time
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if self._art_response is not None:
+                response = self._art_response
+                self._art_response = None
+                self._pending_art_request = None
+                return response
+            time.sleep(0.1)
+        
+        # Timeout - clear pending request
+        self._pending_art_request = None
+        _LOGGING.warning("Art request timed out after %s seconds", timeout)
         return None
     
     def get_current_artwork(self) -> dict | None:
@@ -970,6 +1005,102 @@ class SamsungTVWS:
             
         result = self._send_art_request(request_data)
         return result is not None
+    
+    def download_artwork_thumbnail(self, content_id: str) -> bytes | None:
+        """Download artwork thumbnail using Samsung's binary socket protocol."""
+        if not self._is_connected or self._artmode_status != ArtModeStatus.On:
+            return None
+            
+        # Get connection info for the thumbnail
+        request_data = {
+            "request": "get_artwork_thumbnail",
+            "content_id": content_id
+        }
+        conn_info = self._send_art_request(request_data)
+        if not conn_info:
+            _LOGGING.debug("No connection info received for thumbnail download")
+            return None
+            
+        # Extract connection details
+        host = conn_info.get('host', self.host)
+        port = conn_info.get('port', 8002)
+        conn_id = conn_info.get('conn_id')
+        file_id = conn_info.get('file_id')
+        
+        if not all([conn_id, file_id]):
+            _LOGGING.debug("Missing connection details for thumbnail download")
+            return None
+            
+        # Create binary socket connection
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            
+            # Wrap with SSL context
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            ssl_sock = context.wrap_socket(sock)
+            
+            # Connect to Samsung TV
+            ssl_sock.settimeout(10.0)
+            ssl_sock.connect((host, port))
+            
+            # Send thumbnail request
+            request = {
+                "method": "POST",
+                "body": {
+                    "file_id": file_id,
+                    "conn_id": conn_id
+                }
+            }
+            request_data = json.dumps(request).encode('utf-8')
+            request_header = len(request_data).to_bytes(4, 'big')
+            
+            ssl_sock.sendall(request_header + request_data)
+            
+            # Read 4-byte header length (big-endian)
+            header_length_bytes = ssl_sock.recv(4)
+            if len(header_length_bytes) != 4:
+                _LOGGING.debug("Failed to read header length")
+                return None
+                
+            header_length = int.from_bytes(header_length_bytes, 'big')
+            
+            # Read and parse JSON header
+            header_data = ssl_sock.recv(header_length)
+            if len(header_data) != header_length:
+                _LOGGING.debug("Failed to read complete header")
+                return None
+                
+            header = json.loads(header_data.decode('utf-8'))
+            
+            # Download image data in chunks
+            file_length = header.get('fileLength', 0)
+            if file_length <= 0:
+                _LOGGING.debug("Invalid file length in header")
+                return None
+                
+            thumbnail_data = b''
+            while len(thumbnail_data) < file_length:
+                remaining = file_length - len(thumbnail_data)
+                chunk = ssl_sock.recv(min(8192, remaining))
+                if not chunk:
+                    _LOGGING.debug("Connection closed while reading thumbnail data")
+                    return None
+                thumbnail_data += chunk
+            
+            ssl_sock.close()
+            return thumbnail_data
+            
+        except Exception as ex:
+            _LOGGING.debug("Thumbnail download failed: %s", ex)
+            if 'ssl_sock' in locals():
+                ssl_sock.close()
+            return None
+
+    def art(self):
+        """Return art mode interface for Frame TV functionality."""
+        return SamsungTVArt(self)
 
     @property
     def installed_app(self):
@@ -1334,3 +1465,90 @@ class SamsungTVWS:
     def shortcuts(self):
         """Return a list of available shortcuts."""
         return SamsungTVShortcuts(self)
+
+
+class SamsungTVArt:
+    """Samsung TV Art Mode interface matching working samsungtvws library pattern."""
+
+    def __init__(self, tv: SamsungTVWS):
+        """Initialize art interface with TV instance."""
+        self._tv = tv
+
+    def supported(self) -> bool:
+        """Check if art mode is supported on this TV."""
+        if not self._tv._is_connected:
+            return False
+        return self._tv._client_art_supported == 1 or self._tv._artmode_status != ArtModeStatus.Unsupported
+
+    def available(self) -> list[dict] | None:
+        """Get list of available artworks."""
+        return self._tv.get_available_artworks()
+
+    def get_current(self) -> dict | None:
+        """Get current displayed artwork information."""
+        return self._tv.get_current_artwork()
+
+    def get_artmode(self) -> bool:
+        """Get current art mode status (on/off)."""
+        return self._tv._artmode_status == ArtModeStatus.On
+
+    def set_artmode(self, enabled: bool) -> bool:
+        """Enable or disable art mode."""
+        request_data = {
+            "request": "set_artmode_status",
+            "enabled": enabled,
+        }
+        result = self._tv._send_art_request(request_data)
+        if result is not None:
+            self._tv._artmode_status = ArtModeStatus.On if enabled else ArtModeStatus.Off
+            return True
+        return False
+
+    def select_image(self, content_id: str, show: bool = True) -> bool:
+        """Select and optionally display an artwork."""
+        return self._tv.select_artwork(content_id, show=show)
+
+    def upload(self, image_data: bytes, file_type: str = "JPEG", matte: str = "none") -> str | None:
+        """Upload artwork to Frame TV and return remote filename."""
+        request_data = {
+            "request": "upload_artwork",
+            "image_data": base64.b64encode(image_data).decode('utf-8'),
+            "file_type": file_type,
+            "matte": matte,
+        }
+        result = self._tv._send_art_request(request_data)
+        if result and "content_id" in result:
+            return result["content_id"]
+        return None
+
+    def delete(self, content_id: str | list[str]) -> bool:
+        """Delete artwork by content ID(s)."""
+        if isinstance(content_id, list):
+            content_ids = content_id
+        else:
+            content_ids = [content_id]
+
+        request_data = {
+            "request": "delete_artwork",
+            "content_ids": content_ids,
+        }
+        result = self._tv._send_art_request(request_data)
+        return result is not None
+
+    def get_photo_filter_list(self) -> list[str] | None:
+        """Get available photo filters."""
+        request_data = {"request": "get_photo_filters"}
+        result = self._tv._send_art_request(request_data)
+        if result and "filters" in result:
+            return result["filters"]
+        return None
+
+    def set_photo_filter(self, content_id: str, filter_name: str) -> bool:
+        """Apply photo filter to artwork."""
+        request_data = {
+            "request": "set_photo_filter",
+            "content_id": content_id,
+            "filter": filter_name,
+        }
+        result = self._tv._send_art_request(request_data)
+        return result is not None
