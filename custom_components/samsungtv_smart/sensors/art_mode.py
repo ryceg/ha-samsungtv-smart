@@ -98,16 +98,209 @@ class SamsungTVArtModeStatusSensor(SamsungTVArtSensorBase):
             attributes["connection_method"] = "smartthings"
         
         # Add SmartThings attributes as fallback
-        if self._st and self._st.art_mode:
-            if self._st.art_brightness is not None:
-                attributes.setdefault("brightness", self._st.art_brightness)
-            
-            if self._st.art_matting is not None:
-                attributes.setdefault("matting_style", self._st.art_matting)
-            
-            if self._st.art_sleep_timer is not None:
-                attributes.setdefault("sleep_timer", self._st.art_sleep_timer)
-        
+        if self._st:
+            attributes["smartthings_available"] = True
+            if hasattr(self._st, 'art_mode'):
+                attributes["smartthings_art_mode"] = self._st.art_mode
+
+        return attributes
+
+    def get_art_settings(self) -> dict[str, Any] | None:
+        """Get comprehensive art settings."""
+        if not self._ws or not self.art_mode_supported:
+            return None
+
+        try:
+            settings = {}
+
+            # Get brightness
+            brightness = self._ws.get_art_brightness()
+            if brightness is not None:
+                settings["brightness"] = brightness
+
+            # Get color temperature
+            color_temp = self._ws.get_art_color_temperature()
+            if color_temp is not None:
+                settings["color_temperature"] = color_temp
+
+            # Get slideshow status
+            slideshow = self._ws.get_slideshow_status()
+            if slideshow:
+                settings["slideshow_enabled"] = slideshow.get("value", "off") != "off"
+                settings["slideshow_duration"] = slideshow.get("value", "off")
+                settings["slideshow_type"] = slideshow.get("type", "slideshow")
+                settings["slideshow_category"] = slideshow.get("category_id", "MY-C0002")
+
+            # Get auto rotation status
+            auto_rotation = self._ws.get_auto_rotation_status()
+            if auto_rotation:
+                settings["auto_rotation_enabled"] = auto_rotation.get("value", "off") != "off"
+                settings["auto_rotation_duration"] = auto_rotation.get("value", "off")
+                settings["auto_rotation_type"] = auto_rotation.get("type", "slideshow")
+                settings["auto_rotation_category"] = auto_rotation.get("category_id", "MY-C0002")
+
+            # Get general art mode settings
+            art_settings = self._ws.get_artmode_settings()
+            if art_settings:
+                if isinstance(art_settings, list):
+                    for setting in art_settings:
+                        if isinstance(setting, dict) and "item" in setting and "value" in setting:
+                            settings[f"artmode_{setting['item']}"] = setting["value"]
+                elif isinstance(art_settings, dict):
+                    settings["artmode_settings"] = art_settings
+
+            return settings
+        except Exception as e:
+            _LOGGING.debug("Failed to get art settings: %s", e)
+            return None
+
+
+class SamsungTVArtBrightnessSensor(SamsungTVArtSensorBase):
+    """Representation of a Samsung TV art mode brightness sensor."""
+
+    _attr_device_class = None
+    _attr_icon = "mdi:brightness-6"
+    _attr_native_unit_of_measurement = "%"
+
+    def __init__(self, config: dict[str, Any], entry_id: str, hass: HomeAssistant) -> None:
+        """Initialize the sensor."""
+        super().__init__(config, entry_id, hass, use_channel_info=False)
+
+        self._attr_name = "Art Mode Brightness"
+        self._attr_unique_id = f"{self.unique_id}_art_brightness"
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the brightness value."""
+        if not self._ws or not self.art_mode_supported:
+            return None
+
+        try:
+            return self._ws.get_art_brightness()
+        except Exception as e:
+            _LOGGING.debug("Failed to get art brightness: %s", e)
+            return None
+
+
+class SamsungTVArtColorTemperatureSensor(SamsungTVArtSensorBase):
+    """Representation of a Samsung TV art mode color temperature sensor."""
+
+    _attr_device_class = None
+    _attr_icon = "mdi:thermometer"
+
+    def __init__(self, config: dict[str, Any], entry_id: str, hass: HomeAssistant) -> None:
+        """Initialize the sensor."""
+        super().__init__(config, entry_id, hass, use_channel_info=False)
+
+        self._attr_name = "Art Mode Color Temperature"
+        self._attr_unique_id = f"{self.unique_id}_art_color_temperature"
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the color temperature value."""
+        if not self._ws or not self.art_mode_supported:
+            return None
+
+        try:
+            return self._ws.get_art_color_temperature()
+        except Exception as e:
+            _LOGGING.debug("Failed to get art color temperature: %s", e)
+            return None
+
+
+class SamsungTVArtSlideshowSensor(SamsungTVArtSensorBase):
+    """Representation of a Samsung TV art mode slideshow sensor."""
+
+    _attr_device_class = None
+    _attr_icon = "mdi:slideshow"
+
+    def __init__(self, config: dict[str, Any], entry_id: str, hass: HomeAssistant) -> None:
+        """Initialize the sensor."""
+        super().__init__(config, entry_id, hass, use_channel_info=False)
+
+        self._attr_name = "Art Mode Slideshow"
+        self._attr_unique_id = f"{self.unique_id}_art_slideshow"
+
+    @property
+    def native_value(self) -> str:
+        """Return the slideshow status."""
+        if not self._ws or not self.art_mode_supported:
+            return "unavailable"
+
+        try:
+            slideshow = self._ws.get_slideshow_status()
+            if slideshow:
+                return "on" if slideshow.get("value", "off") != "off" else "off"
+            return "off"
+        except Exception as e:
+            _LOGGING.debug("Failed to get slideshow status: %s", e)
+            return "unknown"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the state attributes."""
+        attributes = {}
+
+        if not self._ws or not self.art_mode_supported:
+            return attributes
+
+        try:
+            slideshow = self._ws.get_slideshow_status()
+            if slideshow:
+                attributes["duration"] = slideshow.get("value", "off")
+                attributes["type"] = slideshow.get("type", "slideshow")
+                attributes["category"] = slideshow.get("category_id", "MY-C0002")
+        except Exception as e:
+            _LOGGING.debug("Failed to get slideshow attributes: %s", e)
+
+        return attributes
+
+
+class SamsungTVArtAutoRotationSensor(SamsungTVArtSensorBase):
+    """Representation of a Samsung TV art mode auto rotation sensor."""
+
+    _attr_device_class = None
+    _attr_icon = "mdi:rotate-3d-variant"
+
+    def __init__(self, config: dict[str, Any], entry_id: str, hass: HomeAssistant) -> None:
+        """Initialize the sensor."""
+        super().__init__(config, entry_id, hass, use_channel_info=False)
+
+        self._attr_name = "Art Mode Auto Rotation"
+        self._attr_unique_id = f"{self.unique_id}_art_auto_rotation"
+
+    @property
+    def native_value(self) -> str:
+        """Return the auto rotation status."""
+        if not self._ws or not self.art_mode_supported:
+            return "unavailable"
+
+        try:
+            auto_rotation = self._ws.get_auto_rotation_status()
+            if auto_rotation:
+                return "on" if auto_rotation.get("value", "off") != "off" else "off"
+            return "off"
+        except Exception as e:
+            _LOGGING.debug("Failed to get auto rotation status: %s", e)
+            return "unknown"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the state attributes."""
+        attributes = {}
+
+        if not self._ws or not self.art_mode_supported:
+            return attributes
+
+        try:
+            auto_rotation = self._ws.get_auto_rotation_status()
+            if auto_rotation:
+                attributes["duration"] = auto_rotation.get("value", "off")
+                attributes["type"] = auto_rotation.get("type", "slideshow")
+                attributes["category"] = auto_rotation.get("category_id", "MY-C0002")
+        except Exception as e:
+            _LOGGING.debug("Failed to get auto rotation attributes: %s", e)
+
         return attributes
 
 
@@ -120,117 +313,48 @@ class SamsungTVCurrentArtworkSensor(SamsungTVArtSensorBase):
     def __init__(self, config: dict[str, Any], entry_id: str, hass: HomeAssistant) -> None:
         """Initialize the sensor."""
         super().__init__(config, entry_id, hass, use_channel_info=False)
-        
+
         self._attr_name = "Current Artwork"
         self._attr_unique_id = f"{self.unique_id}_current_artwork"
 
     @property
     def native_value(self) -> str | None:
-        """Return the state of the sensor."""
-        # Use WebSocket API for detailed artwork information
-        if self._ws and self.art_mode_active:
-            current_artwork = self.get_current_artwork()
-            if current_artwork:
-                _LOGGING.debug("Current artwork response: %s", current_artwork)
-                # Extract artwork name from WebSocket response
-                artwork_name = (
-                    current_artwork.get("name") or 
-                    current_artwork.get("content_id") or
-                    current_artwork.get("title")
-                )
-                _LOGGING.debug("Extracted artwork name: %s", artwork_name)
-                return artwork_name
-            else:
-                _LOGGING.debug("No current artwork data received from WebSocket")
-        else:
-            _LOGGING.debug("WebSocket not available or art mode not active (ws=%s, art_active=%s)", 
-                          bool(self._ws), self.art_mode_active)
-        
-        # Fallback to SmartThings API (limited info)
-        if self._st and self._st.art_mode:
-            return self._st.current_artwork
-        
-        # Return None when art mode is off or no artwork
-        return None
+        """Return the current artwork content ID or name."""
+        if not self._ws or not self.art_mode_supported:
+            return None
+
+        try:
+            current = self._ws.get_current_artwork()
+            if current:
+                return current.get("content_id") or current.get("title", "Unknown")
+            return None
+        except Exception as e:
+            _LOGGING.debug("Failed to get current artwork: %s", e)
+            return None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         attributes = {}
-        
-        # Add WebSocket artwork details
-        if self._ws and self.art_mode_active:
-            current_artwork = self.get_current_artwork()
-            if current_artwork:
-                # Add artwork metadata
-                attributes.update({
-                    "content_id": current_artwork.get("content_id"),
-                    "category_id": current_artwork.get("category_id"), 
-                    "matte_id": current_artwork.get("matte_id"),
-                    "portrait_matte_id": current_artwork.get("portrait_matte_id"),
-                    "content_type": current_artwork.get("content_type"),
-                    "description": current_artwork.get("description"),
-                    "artist": current_artwork.get("artist"),
-                    "source": "websocket",
-                })
-                
-                # Legacy fields for backward compatibility
-                attributes["category"] = current_artwork.get("category_id")
-                attributes["artwork_type"] = current_artwork.get("content_type")
-                
-                # Try to download the actual image data
-                content_id = current_artwork.get("content_id")
-                if content_id:
-                    try:
-                        thumbnail_data = self.download_artwork_thumbnail(content_id)
-                        if thumbnail_data:
-                            import base64
-                            attributes["image_data"] = base64.b64encode(thumbnail_data).decode('utf-8')
-                            attributes["image_size"] = len(thumbnail_data)
-                            # Detect image format
-                            if thumbnail_data.startswith(b'\xff\xd8\xff'):
-                                attributes["image_format"] = "jpeg"
-                                attributes["image_mime_type"] = "image/jpeg"
-                            elif thumbnail_data.startswith(b'\x89PNG'):
-                                attributes["image_format"] = "png"
-                                attributes["image_mime_type"] = "image/png"
-                            else:
-                                attributes["image_format"] = "unknown"
-                            _LOGGING.debug("Downloaded thumbnail: %d bytes (%s)", 
-                                         len(thumbnail_data), attributes.get("image_format", "unknown"))
-                        else:
-                            _LOGGING.debug("Failed to download thumbnail for content_id: %s", content_id)
-                    except Exception as ex:
-                        _LOGGING.debug("Exception downloading thumbnail: %s", ex)
-                
-                # Check if response contains any direct image URLs (fallback)
-                image_urls = self._extract_image_urls(current_artwork)
-                if image_urls:
-                    attributes["image_urls"] = image_urls
-                    # Set primary image URL if any direct URLs are found
-                    for primary_field in ["image_url", "imageUrl", "image", "url"]:
-                        if primary_field in image_urls:
-                            attributes["image_url"] = image_urls[primary_field]
-                            break
-                    for thumb_field in ["thumbnail_url", "thumbnailUrl", "thumbnail", "thumb"]:
-                        if thumb_field in image_urls:
-                            attributes["thumbnail_url"] = image_urls[thumb_field]
-                            break
-        
-        # Add SmartThings artwork info as fallback
-        if self._st and self._st.art_mode and self._st.current_artwork:
-            attributes.setdefault("artwork_name", self._st.current_artwork)
-            attributes.setdefault("source", "smartthings")
-        
-        # Always include art mode status
-        attributes["art_mode_active"] = self.art_mode_active
-        attributes["art_mode_supported"] = self.art_mode_supported
-        
+
+        if not self._ws or not self.art_mode_supported:
+            return attributes
+
+        try:
+            current = self._ws.get_current_artwork()
+            if current:
+                # Include all artwork details as attributes
+                for key, value in current.items():
+                    if key not in ['content_id']:  # Avoid duplicating the state value
+                        attributes[key] = value
+        except Exception as e:
+            _LOGGING.debug("Failed to get current artwork attributes: %s", e)
+
         return attributes
 
 
 class SamsungTVAvailableArtworksSensor(SamsungTVArtSensorBase):
-    """Representation of a Samsung TV available artworks sensor."""
+    """Representation of a Samsung TV available artworks count sensor."""
 
     _attr_device_class = None
     _attr_icon = "mdi:image-multiple"
@@ -238,161 +362,133 @@ class SamsungTVAvailableArtworksSensor(SamsungTVArtSensorBase):
     def __init__(self, config: dict[str, Any], entry_id: str, hass: HomeAssistant) -> None:
         """Initialize the sensor."""
         super().__init__(config, entry_id, hass, use_channel_info=False)
-        
+
         self._attr_name = "Available Artworks"
         self._attr_unique_id = f"{self.unique_id}_available_artworks"
 
     @property
-    def native_value(self) -> int:
+    def native_value(self) -> int | None:
         """Return the count of available artworks."""
-        if not self.art_mode_supported:
-            return 0
-            
-        artworks = self.get_available_artworks()
-        if artworks:
-            return len(artworks)
-        return 0
+        if not self._ws or not self.art_mode_supported:
+            return None
+
+        try:
+            artworks = self._ws.get_available_artworks()
+            return len(artworks) if artworks else 0
+        except Exception as e:
+            _LOGGING.debug("Failed to get available artworks: %s", e)
+            return None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         attributes = {}
-        
-        if not self.art_mode_supported:
-            attributes["error"] = "Art mode not supported"
+
+        if not self._ws or not self.art_mode_supported:
             return attributes
-            
-        artworks = self.get_available_artworks()
-        if artworks:
-            # Group artworks by category
-            categories = {}
-            artwork_list = []
-            
-            for artwork in artworks:
-                category = artwork.get("category", "Unknown")
-                if category not in categories:
-                    categories[category] = 0
-                categories[category] += 1
-                
-                artwork_info = {
-                    "id": artwork.get("content_id"),
-                    "name": artwork.get("name") or artwork.get("title"),
-                    "category": category,
-                    "content_type": artwork.get("content_type"),
-                    "description": artwork.get("description"),
-                    "artist": artwork.get("artist"),
-                }
-                
-                # Check if artwork data contains any direct image URLs (rare)
-                artwork_image_urls = self._extract_image_urls(artwork)
-                if artwork_image_urls:
-                    artwork_info["image_urls"] = artwork_image_urls
-                
-                artwork_list.append(artwork_info)
-            
-            attributes.update({
-                "categories": categories,
-                "total_count": len(artworks),
-                "artworks": artwork_list[:10],  # Limit to first 10 for state size
-                "has_more": len(artworks) > 10,
-            })
-        else:
-            attributes["error"] = "Unable to retrieve artwork list"
-        
+
+        try:
+            artworks = self._ws.get_available_artworks()
+            if artworks:
+                # Group by category
+                categories = {}
+                for artwork in artworks:
+                    category = artwork.get("category_id", "unknown")
+                    if category not in categories:
+                        categories[category] = []
+                    categories[category].append({
+                        "content_id": artwork.get("content_id"),
+                        "title": artwork.get("title", "Unknown"),
+                        "category": artwork.get("category")
+                    })
+
+                attributes["categories"] = categories
+                attributes["total_count"] = len(artworks)
+        except Exception as e:
+            _LOGGING.debug("Failed to get available artworks attributes: %s", e)
+
         return attributes
 
 
-class SamsungTVSlideshowStatusSensor(SamsungTVArtSensorBase):
-    """Representation of a Samsung TV slideshow status sensor."""
+class SamsungTVApiVersionSensor(SamsungTVArtSensorBase):
+    """Representation of a Samsung TV art API version sensor."""
 
     _attr_device_class = None
-    _attr_icon = "mdi:slideshow"
+    _attr_icon = "mdi:api"
 
     def __init__(self, config: dict[str, Any], entry_id: str, hass: HomeAssistant) -> None:
         """Initialize the sensor."""
         super().__init__(config, entry_id, hass, use_channel_info=False)
-        
-        self._attr_name = "Slideshow Status"
-        self._attr_unique_id = f"{self.unique_id}_slideshow_status"
+
+        self._attr_name = "Art API Version"
+        self._attr_unique_id = f"{self.unique_id}_art_api_version"
 
     @property
-    def native_value(self) -> str:
-        """Return the slideshow status."""
-        if not self.art_mode_supported:
-            return "unsupported"
-            
-        slideshow_data = self.get_slideshow_status()
-        if slideshow_data:
-            return "on" if slideshow_data.get("enabled", False) else "off"
-        return "unknown"
+    def native_value(self) -> str | None:
+        """Return the API version."""
+        if not self._ws or not self.art_mode_supported:
+            return None
 
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the state attributes."""
-        attributes = {}
-        
-        if not self.art_mode_supported:
-            return {"error": "Art mode not supported"}
-            
-        slideshow_data = self.get_slideshow_status()
-        if slideshow_data:
-            attributes.update({
-                "enabled": slideshow_data.get("enabled", False),
-                "duration_minutes": slideshow_data.get("duration"),
-                "slideshow_type": slideshow_data.get("type"),
-                "current_position": slideshow_data.get("position"),
-                "total_images": slideshow_data.get("total"),
-            })
-        
-        return attributes
+        try:
+            return self._ws.get_api_version()
+        except Exception as e:
+            _LOGGING.debug("Failed to get API version: %s", e)
+            return None
 
 
-class SamsungTVArtSettingsSensor(SamsungTVArtSensorBase):
-    """Representation of a Samsung TV art settings sensor."""
+class SamsungTVDeviceInfoSensor(SamsungTVArtSensorBase):
+    """Representation of a Samsung TV comprehensive device info sensor."""
 
     _attr_device_class = None
-    _attr_icon = "mdi:tune"
+    _attr_icon = "mdi:information"
 
     def __init__(self, config: dict[str, Any], entry_id: str, hass: HomeAssistant) -> None:
         """Initialize the sensor."""
         super().__init__(config, entry_id, hass, use_channel_info=False)
-        
-        self._attr_name = "Art Settings"
-        self._attr_unique_id = f"{self.unique_id}_art_settings"
+
+        self._attr_name = "Device Information"
+        self._attr_unique_id = f"{self.unique_id}_device_info"
 
     @property
-    def native_value(self) -> str:
-        """Return the current art mode configuration summary."""
-        if not self.art_mode_supported:
-            return "unsupported"
-        elif not self.art_mode_active:
-            return "inactive"
-        else:
-            return "configured"
+    def native_value(self) -> str | None:
+        """Return a summary of device info."""
+        if not self._ws or not self.art_mode_supported:
+            return None
+
+        try:
+            device_info = self._ws.get_device_info()
+            if device_info:
+                # Return a summary value
+                model = device_info.get("device_name", "Unknown")
+                return f"{model}"
+            return None
+        except Exception as e:
+            _LOGGING.debug("Failed to get device info: %s", e)
+            return None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the art settings as attributes."""
+        """Return the device information as attributes."""
         attributes = {}
-        
-        if not self.art_mode_supported:
-            return {"error": "Art mode not supported"}
-        
-        # Get settings from WebSocket
-        art_settings = self.get_art_settings()
-        if art_settings:
-            attributes.update(art_settings)
-        
-        # Add SmartThings settings as fallback
-        if self._st and self._st.art_mode:
-            attributes.setdefault("brightness", self._st.art_brightness)
-            attributes.setdefault("matting_style", self._st.art_matting)
-            attributes.setdefault("sleep_timer", self._st.art_sleep_timer)
-        
-        # Add status information
-        attributes.update({
-            "art_mode_active": self.art_mode_active,
-            "art_mode_supported": self.art_mode_supported,
-        })
-        
+
+        if not self._ws or not self.art_mode_supported:
+            return attributes
+
+        try:
+            device_info = self._ws.get_device_info()
+            if device_info:
+                # Include all device info as attributes
+                for key, value in device_info.items():
+                    # Clean up attribute names
+                    attr_name = key.replace("_", " ").title()
+                    attributes[attr_name] = value
+
+                # Add API version as well
+                api_version = self._ws.get_api_version()
+                if api_version:
+                    attributes["Art API Version"] = api_version
+
+        except Exception as e:
+            _LOGGING.debug("Failed to get device info attributes: %s", e)
+
         return attributes

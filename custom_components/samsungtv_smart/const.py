@@ -97,6 +97,12 @@ SERVICE_SET_ART_MODE = "set_art_mode"
 SERVICE_SELECT_ARTWORK = "select_artwork"
 SERVICE_CONFIGURE_ART_SETTINGS = "configure_art_settings"
 SERVICE_SET_SLIDESHOW = "set_slideshow"
+SERVICE_UPLOAD_ARTWORK = "upload_artwork"
+SERVICE_DELETE_ARTWORK = "delete_artwork"
+SERVICE_DELETE_ARTWORKS = "delete_artworks"
+SERVICE_SET_ARTWORK_FAVORITE = "set_artwork_favorite"
+SERVICE_APPLY_PHOTO_FILTER = "apply_photo_filter"
+SERVICE_CHANGE_ARTWORK_MATTE = "change_artwork_matte"
 
 SIGNAL_CONFIG_ENTITY = f"{DOMAIN}_config"
 

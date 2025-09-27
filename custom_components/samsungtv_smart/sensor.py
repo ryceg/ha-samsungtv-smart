@@ -10,11 +10,11 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DATA_CFG, DOMAIN
 from .sensors.art_mode import (
     SamsungTVArtModeStatusSensor,
-    SamsungTVArtSettingsSensor,
     SamsungTVAvailableArtworksSensor,
     SamsungTVCurrentArtworkSensor,
-    SamsungTVSlideshowStatusSensor,
     SamsungTVStatusSensor,
+    SamsungTVApiVersionSensor,
+    SamsungTVDeviceInfoSensor,
 )
 from .sensors.channel import SamsungTVChannelNameSensor
 from .sensors.media_playback import SamsungTVPlaybackStatusSensor
@@ -50,8 +50,9 @@ async def async_setup_entry(
         SamsungTVArtModeStatusSensor(config, entry.entry_id, hass),
         SamsungTVCurrentArtworkSensor(config, entry.entry_id, hass),
         SamsungTVAvailableArtworksSensor(config, entry.entry_id, hass),
-        SamsungTVSlideshowStatusSensor(config, entry.entry_id, hass),
-        SamsungTVArtSettingsSensor(config, entry.entry_id, hass),
+        # Device info sensors
+        SamsungTVApiVersionSensor(config, entry.entry_id, hass),
+        SamsungTVDeviceInfoSensor(config, entry.entry_id, hass),
     ])
 
     async_add_entities(sensors, True)
