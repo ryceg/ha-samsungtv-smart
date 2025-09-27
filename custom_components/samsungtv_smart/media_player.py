@@ -95,15 +95,6 @@ from .const import (
     MAX_WOL_REPEAT,
     SERVICE_SELECT_PICTURE_MODE,
     SERVICE_SET_ART_MODE,
-    SERVICE_SELECT_ARTWORK,
-    SERVICE_CONFIGURE_ART_SETTINGS,
-    SERVICE_SET_SLIDESHOW,
-    SERVICE_UPLOAD_ARTWORK,
-    SERVICE_DELETE_ARTWORK,
-    SERVICE_DELETE_ARTWORKS,
-    SERVICE_SET_ARTWORK_FAVORITE,
-    SERVICE_APPLY_PHOTO_FILTER,
-    SERVICE_CHANGE_ARTWORK_MATTE,
     SIGNAL_CONFIG_ENTITY,
     STD_APP_LIST,
     WS_PREFIX,
@@ -117,21 +108,7 @@ from .logo import LOGO_OPTION_DEFAULT, LocalImageUrl, Logo, LogoOption
 ATTR_ART_MODE_STATUS = "art_mode_status"
 ATTR_IP_ADDRESS = "ip_address"
 ATTR_PICTURE_MODE = "picture_mode"
-ATTR_ENABLED = "enabled"
-ATTR_CONTENT_ID = "content_id"
-ATTR_CATEGORY = "category"
-ATTR_BRIGHTNESS = "brightness"
-ATTR_MATTING_STYLE = "matting_style"
-ATTR_SLEEP_TIMER = "sleep_timer"
-ATTR_DURATION_MINUTES = "duration_minutes"
 ATTR_PICTURE_MODE_LIST = "picture_mode_list"
-ATTR_FILE_PATH = "file_path"
-ATTR_MATTE = "matte"
-ATTR_CONTENT_IDS = "content_ids"
-ATTR_FAVORITE = "favorite"
-ATTR_FILTER_ID = "filter_id"
-ATTR_MATTE_ID = "matte_id"
-ATTR_PORTRAIT_MATTE = "portrait_matte"
 
 CMD_OPEN_BROWSER = "open_browser"
 CMD_RUN_APP = "run_app"
@@ -223,76 +200,8 @@ async def async_setup_entry(
     )
     platform.async_register_entity_service(
         SERVICE_SET_ART_MODE,
-        {vol.Required(ATTR_ENABLED): cv.boolean},
+        {},
         "async_set_art_mode",
-    )
-    platform.async_register_entity_service(
-        SERVICE_SELECT_ARTWORK,
-        {
-            vol.Required(ATTR_CONTENT_ID): cv.string,
-            vol.Optional(ATTR_CATEGORY): cv.string,
-        },
-        "async_select_artwork",
-    )
-    platform.async_register_entity_service(
-        SERVICE_CONFIGURE_ART_SETTINGS,
-        {
-            vol.Optional(ATTR_BRIGHTNESS): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
-            vol.Optional(ATTR_MATTING_STYLE): cv.string,
-            vol.Optional(ATTR_SLEEP_TIMER): vol.All(vol.Coerce(int), vol.Range(min=0, max=1440)),
-        },
-        "async_configure_art_settings",
-    )
-    platform.async_register_entity_service(
-        SERVICE_SET_SLIDESHOW,
-        {
-            vol.Required(ATTR_ENABLED): cv.boolean,
-            vol.Optional(ATTR_DURATION_MINUTES): vol.All(vol.Coerce(int), vol.Range(min=1, max=1440)),
-        },
-        "async_set_slideshow",
-    )
-    platform.async_register_entity_service(
-        SERVICE_UPLOAD_ARTWORK,
-        {
-            vol.Required(ATTR_FILE_PATH): cv.string,
-            vol.Optional(ATTR_MATTE, default="shadowbox_polar"): cv.string,
-        },
-        "async_upload_artwork",
-    )
-    platform.async_register_entity_service(
-        SERVICE_DELETE_ARTWORK,
-        {vol.Required(ATTR_CONTENT_ID): cv.string},
-        "async_delete_artwork",
-    )
-    platform.async_register_entity_service(
-        SERVICE_DELETE_ARTWORKS,
-        {vol.Required(ATTR_CONTENT_IDS): cv.string},
-        "async_delete_artworks",
-    )
-    platform.async_register_entity_service(
-        SERVICE_SET_ARTWORK_FAVORITE,
-        {
-            vol.Required(ATTR_CONTENT_ID): cv.string,
-            vol.Optional(ATTR_FAVORITE, default=True): cv.boolean,
-        },
-        "async_set_artwork_favorite",
-    )
-    platform.async_register_entity_service(
-        SERVICE_APPLY_PHOTO_FILTER,
-        {
-            vol.Required(ATTR_CONTENT_ID): cv.string,
-            vol.Required(ATTR_FILTER_ID): cv.string,
-        },
-        "async_apply_photo_filter",
-    )
-    platform.async_register_entity_service(
-        SERVICE_CHANGE_ARTWORK_MATTE,
-        {
-            vol.Required(ATTR_CONTENT_ID): cv.string,
-            vol.Optional(ATTR_MATTE_ID): cv.string,
-            vol.Optional(ATTR_PORTRAIT_MATTE): cv.string,
-        },
-        "async_change_artwork_matte",
     )
 
 
@@ -1346,27 +1255,15 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
         """Turn the media player on."""
         await self._async_turn_on()
 
-    async def async_set_art_mode(self, enabled: bool = True):
-        """Enable or disable art mode via WebSocket or fallback methods."""
-        # Try WebSocket art mode control first
-        if self._ws and self._ws.artmode_status != ArtModeStatus.Unsupported:
-            success = self._ws.set_artmode(enabled)
-            if success:
-                return
-        
-        # Fallback to existing logic for partial art mode support
-        if enabled:
-            if (
-                self._state == MediaPlayerState.ON
-                and self.support_art_mode == ArtModeSupport.PARTIAL
-            ):
-                await self.async_send_command("KEY_POWER")
-            elif self.support_art_mode == ArtModeSupport.FULL:
-                await self._async_turn_on(True)
-        else:
-            # To disable art mode, turn TV on normally
-            if self._state != MediaPlayerState.ON:
-                await self._async_turn_on()
+    async def async_set_art_mode(self):
+        """Turn the media player on setting in art mode."""
+        if (
+            self._state == MediaPlayerState.ON
+            and self.support_art_mode == ArtModeSupport.PARTIAL
+        ):
+            await self.async_send_command("KEY_POWER")
+        elif self.support_art_mode == ArtModeSupport.FULL:
+            await self._async_turn_on(True)
 
     def _turn_off(self):
         """Turn off media player."""
@@ -1801,191 +1698,6 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
         if not self._st:
             raise NotImplementedError()
         await self._st.async_set_picture_mode(picture_mode)
-
-    async def async_select_artwork(self, content_id: str, category: str = None):
-        """Select and display specific artwork."""
-        if not self._ws or self._ws.artmode_status == ArtModeStatus.Unsupported:
-            raise NotImplementedError("Art mode WebSocket not available")
-        
-        success = self._ws.select_artwork(content_id, category)
-        if not success:
-            raise RuntimeError(f"Failed to select artwork: {content_id}")
-
-    async def async_configure_art_settings(
-        self,
-        brightness: int = None,
-        color_temperature: int = None,
-        matting_style: str = None,
-        sleep_timer: int = None
-    ):
-        """Configure art mode settings using enhanced API."""
-        if not self._ws or self._ws.artmode_status == ArtModeStatus.Unsupported:
-            raise NotImplementedError("Art mode WebSocket not available")
-
-        success = True
-
-        if brightness is not None:
-            success &= self._ws.set_art_brightness(brightness)
-
-        if color_temperature is not None:
-            success &= self._ws.set_art_color_temperature(color_temperature)
-
-        if matting_style is not None:
-            # Use enhanced matting if available, fallback to basic
-            if hasattr(self._ws, 'set_art_matting'):
-                success &= self._ws.set_art_matting(matting_style)
-
-        if sleep_timer is not None:
-            # Use enhanced sleep timer if available, fallback to basic
-            if hasattr(self._ws, 'set_art_sleep_timer'):
-                success &= self._ws.set_art_sleep_timer(sleep_timer)
-
-        if not success:
-            raise RuntimeError("Failed to configure one or more art settings")
-
-    async def async_set_slideshow(self, enabled: bool, duration_minutes: int = None, shuffle: bool = True, category: int = 2):
-        """Configure artwork slideshow/rotation using enhanced API."""
-        if not self._ws or self._ws.artmode_status == ArtModeStatus.Unsupported:
-            raise NotImplementedError("Art mode WebSocket not available")
-
-        success = self._ws.set_slideshow(enabled, duration_minutes, shuffle, category)
-        if not success:
-            raise RuntimeError("Failed to configure slideshow settings")
-
-    async def async_set_auto_rotation(self, enabled: bool, duration_minutes: int = None, shuffle: bool = True, category: int = 2):
-        """Configure artwork auto rotation using enhanced API."""
-        if not self._ws or self._ws.artmode_status == ArtModeStatus.Unsupported:
-            raise NotImplementedError("Art mode WebSocket not available")
-
-        success = self._ws.set_auto_rotation(enabled, duration_minutes, shuffle, category)
-        if not success:
-            raise RuntimeError("Failed to configure auto rotation settings")
-
-    async def async_set_artwork_favorite(self, content_id: str, favorite: bool = True):
-        """Set artwork as favorite or unfavorite."""
-        if not self._ws or self._ws.artmode_status == ArtModeStatus.Unsupported:
-            raise NotImplementedError("Art mode WebSocket not available")
-
-        success = self._ws.set_artwork_favorite(content_id, favorite)
-        if not success:
-            raise RuntimeError(f"Failed to set artwork favorite: {content_id}")
-
-    async def async_upload_artwork(self, file_path: str, matte: str = "shadowbox_polar"):
-        """Upload artwork to Frame TV from file path."""
-        if not self._ws or self._ws.artmode_status == ArtModeStatus.Unsupported:
-            raise NotImplementedError("Art mode WebSocket not available")
-
-        # Read file data
-        try:
-            with open(file_path, 'rb') as file:
-                file_data = file.read()
-        except (IOError, OSError) as e:
-            raise RuntimeError(f"Failed to read file {file_path}: {e}")
-
-        # Determine file type from extension
-        file_extension = file_path.lower().split('.')[-1]
-        if file_extension in ['jpg', 'jpeg']:
-            file_type = 'jpg'
-        elif file_extension == 'png':
-            file_type = 'png'
-        else:
-            file_type = 'jpg'  # Default fallback
-
-        content_id = await self.hass.async_add_executor_job(
-            self._ws.upload_artwork, file_data, file_type, matte
-        )
-        if not content_id:
-            raise RuntimeError("Failed to upload artwork")
-        return content_id
-
-    async def async_get_artwork_thumbnail(self, content_id: str):
-        """Download artwork thumbnail."""
-        if not self._ws or self._ws.artmode_status == ArtModeStatus.Unsupported:
-            raise NotImplementedError("Art mode WebSocket not available")
-
-        thumbnail = self._ws.get_artwork_thumbnail(content_id)
-        if not thumbnail:
-            raise RuntimeError(f"Failed to download thumbnail: {content_id}")
-        return thumbnail
-
-    async def async_get_art_settings(self):
-        """Get current art mode settings."""
-        if not self._ws or self._ws.artmode_status == ArtModeStatus.Unsupported:
-            raise NotImplementedError("Art mode WebSocket not available")
-
-        settings = {}
-
-        # Get various settings
-        art_settings = self._ws.get_artmode_settings()
-        if art_settings:
-            settings['artmode_settings'] = art_settings
-
-        brightness = self._ws.get_art_brightness()
-        if brightness is not None:
-            settings['brightness'] = brightness
-
-        color_temp = self._ws.get_art_color_temperature()
-        if color_temp is not None:
-            settings['color_temperature'] = color_temp
-
-        slideshow = self._ws.get_slideshow_status()
-        if slideshow:
-            settings['slideshow'] = slideshow
-
-        auto_rotation = self._ws.get_auto_rotation_status()
-        if auto_rotation:
-            settings['auto_rotation'] = auto_rotation
-
-        return settings
-
-    async def async_delete_artwork(self, content_id: str):
-        """Delete specific artwork from Frame TV."""
-        if not self._ws or self._ws.artmode_status == ArtModeStatus.Unsupported:
-            raise NotImplementedError("Art mode WebSocket not available")
-
-        success = await self.hass.async_add_executor_job(
-            self._ws.delete_artwork, content_id
-        )
-        if not success:
-            raise RuntimeError(f"Failed to delete artwork: {content_id}")
-
-    async def async_delete_artworks(self, content_ids: str):
-        """Delete multiple artworks from Frame TV."""
-        if not self._ws or self._ws.artmode_status == ArtModeStatus.Unsupported:
-            raise NotImplementedError("Art mode WebSocket not available")
-
-        # Parse comma-separated content IDs
-        id_list = [id.strip() for id in content_ids.split(',') if id.strip()]
-        if not id_list:
-            raise ValueError("No valid content IDs provided")
-
-        success = await self.hass.async_add_executor_job(
-            self._ws.delete_artworks, id_list
-        )
-        if not success:
-            raise RuntimeError(f"Failed to delete artworks: {content_ids}")
-
-    async def async_apply_photo_filter(self, content_id: str, filter_id: str):
-        """Apply photo filter to specific artwork."""
-        if not self._ws or self._ws.artmode_status == ArtModeStatus.Unsupported:
-            raise NotImplementedError("Art mode WebSocket not available")
-
-        success = await self.hass.async_add_executor_job(
-            self._ws.set_photo_filter, content_id, filter_id
-        )
-        if not success:
-            raise RuntimeError(f"Failed to apply filter {filter_id} to artwork: {content_id}")
-
-    async def async_change_artwork_matte(self, content_id: str, matte_id: str = None, portrait_matte: str = None):
-        """Change matte/frame for specific artwork."""
-        if not self._ws or self._ws.artmode_status == ArtModeStatus.Unsupported:
-            raise NotImplementedError("Art mode WebSocket not available")
-
-        success = await self.hass.async_add_executor_job(
-            self._ws.change_matte, content_id, matte_id, portrait_matte
-        )
-        if not success:
-            raise RuntimeError(f"Failed to change matte for artwork: {content_id}")
 
     async def _async_switch_entity(self, power_on: bool):
         """Switch on/off related configure HA entity."""
