@@ -95,7 +95,7 @@ DEVICE_INFO = {
     ATTR_DEVICE_OS: "OS",
 }
 
-SAMSMART_PLATFORM = [Platform.MEDIA_PLAYER, Platform.REMOTE]
+SAMSMART_PLATFORM = [Platform.MEDIA_PLAYER, Platform.REMOTE, Platform.SENSOR, Platform.NUMBER, Platform.SELECT, Platform.BINARY_SENSOR]
 
 SAMSMART_SCHEMA = {
     vol.Optional(CONF_SOURCE_LIST, default=DEFAULT_SOURCE_LIST): cv.string,

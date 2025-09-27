@@ -21,7 +21,7 @@ select_picture_mode:
 
 set_art_mode:
   name: Set Art Mode
-  description: Send to samsung TV the command to set art mode.
+  description: Enable or disable art mode on Samsung Frame TV.
   fields:
     entity_id:
       name: Entity Name
@@ -31,3 +31,280 @@ set_art_mode:
       selector:
         entity:
           integration: samsungtv_smart
+    enabled:
+      name: Enable Art Mode
+      description: Whether to enable or disable art mode
+      required: true
+      default: true
+      selector:
+        boolean:
+
+select_artwork:
+  name: Select Artwork
+  description: Select and display specific artwork on Samsung Frame TV.
+  fields:
+    entity_id:
+      name: Entity Name
+      description: Name of the target entity
+      required: true
+      example: "media_player.tv"
+      selector:
+        entity:
+          integration: samsungtv_smart
+    content_id:
+      name: Artwork Content ID
+      description: The ID of the artwork to display
+      required: true
+      example: "MY_F002_000001"
+      selector:
+        text:
+    category:
+      name: Category
+      description: Optional category filter for the artwork
+      required: false
+      example: "MY-C0002"
+      selector:
+        text:
+
+configure_art_settings:
+  name: Configure Art Settings
+  description: Adjust art mode display settings on Samsung Frame TV.
+  fields:
+    entity_id:
+      name: Entity Name
+      description: Name of the target entity
+      required: true
+      example: "media_player.tv"
+      selector:
+        entity:
+          integration: samsungtv_smart
+    brightness:
+      name: Brightness
+      description: Art mode brightness (0-100)
+      required: false
+      example: 50
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    matting_style:
+      name: Matting Style
+      description: Frame matting style for the artwork
+      required: false
+      example: "shadowbox_polar"
+      selector:
+        select:
+          options:
+            - "shadowbox_polar"
+            - "shadowbox_black"
+            - "shadowbox_white"
+            - "modern_black"
+            - "modern_white"
+            - "beveled_black"
+            - "beveled_white"
+    sleep_timer:
+      name: Sleep Timer
+      description: Art mode sleep timer in minutes (0 to disable)
+      required: false
+      example: 60
+      selector:
+        number:
+          min: 0
+          max: 1440
+          unit_of_measurement: "minutes"
+
+set_slideshow:
+  name: Set Slideshow
+  description: Configure artwork slideshow/rotation on Samsung Frame TV.
+  fields:
+    entity_id:
+      name: Entity Name
+      description: Name of the target entity
+      required: true
+      example: "media_player.tv"
+      selector:
+        entity:
+          integration: samsungtv_smart
+    enabled:
+      name: Enable Slideshow
+      description: Whether to enable or disable slideshow
+      required: true
+      default: false
+      selector:
+        boolean:
+    duration_minutes:
+      name: Duration
+      description: Time between artwork changes in minutes
+      required: false
+      example: 30
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: "minutes"
+
+upload_artwork:
+  name: Upload Artwork
+  description: Upload image file to Samsung Frame TV as artwork.
+  fields:
+    entity_id:
+      name: Entity Name
+      description: Name of the target entity
+      required: true
+      example: "media_player.tv"
+      selector:
+        entity:
+          integration: samsungtv_smart
+    file_path:
+      name: Image File Path
+      description: Path to the image file to upload
+      required: true
+      example: "/config/www/artwork/my_image.jpg"
+      selector:
+        text:
+    matte:
+      name: Matte Style
+      description: Matte/frame style to apply to the uploaded artwork
+      required: false
+      default: "shadowbox_polar"
+      example: "shadowbox_polar"
+      selector:
+        select:
+          options:
+            - "none"
+            - "shadowbox_polar"
+            - "shadowbox_black"
+            - "shadowbox_white"
+            - "modern_black"
+            - "modern_white"
+            - "beveled_black"
+            - "beveled_white"
+
+delete_artwork:
+  name: Delete Artwork
+  description: Delete artwork from Samsung Frame TV.
+  fields:
+    entity_id:
+      name: Entity Name
+      description: Name of the target entity
+      required: true
+      example: "media_player.tv"
+      selector:
+        entity:
+          integration: samsungtv_smart
+    content_id:
+      name: Artwork Content ID
+      description: The ID of the artwork to delete
+      required: true
+      example: "MY_F002_000001"
+      selector:
+        text:
+
+delete_artworks:
+  name: Delete Multiple Artworks
+  description: Delete multiple artworks from Samsung Frame TV.
+  fields:
+    entity_id:
+      name: Entity Name
+      description: Name of the target entity
+      required: true
+      example: "media_player.tv"
+      selector:
+        entity:
+          integration: samsungtv_smart
+    content_ids:
+      name: Artwork Content IDs
+      description: List of artwork content IDs to delete (comma-separated)
+      required: true
+      example: "MY_F002_000001,MY_F002_000002,MY_F002_000003"
+      selector:
+        text:
+
+set_artwork_favorite:
+  name: Set Artwork Favorite
+  description: Mark artwork as favorite or unfavorite on Samsung Frame TV.
+  fields:
+    entity_id:
+      name: Entity Name
+      description: Name of the target entity
+      required: true
+      example: "media_player.tv"
+      selector:
+        entity:
+          integration: samsungtv_smart
+    content_id:
+      name: Artwork Content ID
+      description: The ID of the artwork to mark as favorite
+      required: true
+      example: "MY_F002_000001"
+      selector:
+        text:
+    favorite:
+      name: Set as Favorite
+      description: Whether to mark as favorite or unfavorite
+      required: true
+      default: true
+      selector:
+        boolean:
+
+apply_photo_filter:
+  name: Apply Photo Filter
+  description: Apply photo filter to artwork on Samsung Frame TV.
+  fields:
+    entity_id:
+      name: Entity Name
+      description: Name of the target entity
+      required: true
+      example: "media_player.tv"
+      selector:
+        entity:
+          integration: samsungtv_smart
+    content_id:
+      name: Artwork Content ID
+      description: The ID of the artwork to apply filter to
+      required: true
+      example: "MY_F002_000001"
+      selector:
+        text:
+    filter_id:
+      name: Filter ID
+      description: The ID of the photo filter to apply
+      required: true
+      example: "filter_vintage"
+      selector:
+        text:
+
+change_artwork_matte:
+  name: Change Artwork Matte
+  description: Change the matte/frame for specific artwork on Samsung Frame TV.
+  fields:
+    entity_id:
+      name: Entity Name
+      description: Name of the target entity
+      required: true
+      example: "media_player.tv"
+      selector:
+        entity:
+          integration: samsungtv_smart
+    content_id:
+      name: Artwork Content ID
+      description: The ID of the artwork to change matte for
+      required: true
+      example: "MY_F002_000001"
+      selector:
+        text:
+    matte_id:
+      name: Matte ID
+      description: The ID of the matte style to apply (leave empty for none)
+      required: false
+      example: "shadowbox_polar"
+      selector:
+        text:
+    portrait_matte:
+      name: Portrait Matte ID
+      description: The ID of the portrait matte style to apply
+      required: false
+      example: "shadowbox_polar"
+      selector:
+        text:
