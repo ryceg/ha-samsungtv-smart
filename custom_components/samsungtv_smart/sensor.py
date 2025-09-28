@@ -62,8 +62,26 @@ class ArtModeDataUpdateCoordinator(DataUpdateCoordinator):
             elif art_mode_status == ArtModeStatus.Unavailable:
                 data["art_mode_status"] = "unavailable"
 
-            # For now, return basic status. Additional details would require
-            # extending the existing WebSocket art mode connection
+            # If art mode is on, try to get current artwork information
+            if art_mode_status == ArtModeStatus.On:
+                try:
+                    # Use the new SamsungTVArt API to get current artwork
+                    from .api.art import SamsungTVArt
+                    art_api = SamsungTVArt(self.config['host'],
+                                         self.config.get('port', 8001),
+                                         self.config.get('timeout', 5))
+
+                    # Get current artwork details
+                    current_artwork = art_api.get_current_artwork()
+                    if current_artwork:
+                        data["current_artwork"] = current_artwork
+
+                    art_api.close()
+
+                except Exception as exc:
+                    _LOGGER.debug("Error fetching current artwork: %s", exc)
+                    # Don't fail the entire update for artwork info
+
             return data
 
         except Exception as exc:
@@ -92,6 +110,7 @@ async def async_setup_entry(
     if coordinator.data:
         entities = [
             ArtModeStatusSensor(coordinator, config_entry),
+            CurrentArtworkSensor(coordinator, config_entry),
         ]
         async_add_entities(entities, True)
 
@@ -136,4 +155,50 @@ class ArtModeStatusSensor(SamsungTVArtSensor):
             "is_art_mode": self.coordinator.data.get(self._attr_key) == "on"
         }
 
+
+class CurrentArtworkSensor(SamsungTVArtSensor):
+    """Sensor for current artwork in art mode."""
+
+    _attr_key = "current_artwork"
+    _attr_name = "Current artwork"
+    _attr_icon = "mdi:image-frame"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the name/title of current artwork."""
+        artwork_data = self.coordinator.data.get(self._attr_key)
+        if artwork_data:
+            # Try different possible keys for artwork name
+            return (
+                artwork_data.get("content_name") or
+                artwork_data.get("title") or
+                artwork_data.get("name") or
+                "Unknown Artwork"
+            )
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return additional state attributes for artwork details."""
+        artwork_data = self.coordinator.data.get(self._attr_key)
+        if artwork_data:
+            return {
+                "content_id": artwork_data.get("content_id"),
+                "category_id": artwork_data.get("category_id"),
+                "image_url": artwork_data.get("image_url"),
+                "thumbnail_url": artwork_data.get("thumbnail_url"),
+                "artist": artwork_data.get("artist"),
+                "description": artwork_data.get("description"),
+                "artwork_data": artwork_data  # Full data for advanced users
+            }
+        return None
+
+    @property
+    def entity_picture(self) -> str | None:
+        """Return artwork image for entity picture."""
+        artwork_data = self.coordinator.data.get(self._attr_key)
+        if artwork_data:
+            # Prefer thumbnail for entity picture to reduce size
+            return artwork_data.get("thumbnail_url") or artwork_data.get("image_url")
+        return None
 

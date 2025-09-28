@@ -31,3 +31,23 @@ set_art_mode:
       selector:
         entity:
           integration: samsungtv_smart
+
+select_art_picture:
+  name: Select Art Picture
+  description: Select a specific artwork/picture to display in Art Mode.
+  fields:
+    entity_id:
+      name: Entity Name
+      description: Name of the target entity
+      required: true
+      example: "media_player.tv"
+      selector:
+        entity:
+          integration: samsungtv_smart
+    art_picture:
+      name: Art Picture
+      description: The artwork to display. Can be artwork name, content ID, or category/content.
+      required: true
+      example: "The Starry Night"
+      selector:
+        text:

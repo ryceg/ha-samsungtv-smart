@@ -94,6 +94,7 @@ RESULT_WRONG_APIKEY = "wrong_api_key"
 
 SERVICE_SELECT_PICTURE_MODE = "select_picture_mode"
 SERVICE_SET_ART_MODE = "set_art_mode"
+SERVICE_SELECT_ART_PICTURE = "select_art_picture"
 
 SIGNAL_CONFIG_ENTITY = f"{DOMAIN}_config"
 

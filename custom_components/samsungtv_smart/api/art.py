@@ -282,6 +282,19 @@ class SamsungTVArt:
             _LOGGING.error("Error setting art mode: %s", exc)
         return False
 
+    def set_current_artwork(self, content_id: str) -> bool:
+        """Set the current artwork by content ID."""
+        try:
+            response = self._send_command({
+                "request": "set_current_artwork",
+                "content_id": content_id,
+                "id": self.get_uuid()
+            })
+            return response is not None
+        except Exception as exc:
+            _LOGGING.error("Error setting current artwork: %s", exc)
+        return False
+
     def close(self):
         """Close connection."""
         self._disconnect()
