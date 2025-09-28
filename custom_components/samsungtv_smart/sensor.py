@@ -81,6 +81,8 @@ class ArtModeDataUpdateCoordinator(DataUpdateCoordinator):
                 except Exception as exc:
                     _LOGGER.debug("Error fetching current artwork: %s", exc)
                     # Don't fail the entire update for artwork info
+                    # Set a placeholder so the user knows there was an issue
+                    data["current_artwork"] = {"error": str(exc)}
 
             return data
 
@@ -113,6 +115,22 @@ async def async_setup_entry(
             CurrentArtworkSensor(coordinator, config_entry),
         ]
         async_add_entities(entities, True)
+    else:
+        # Check if Frame TV is supported through device info
+        try:
+            from .api.art import SamsungTVArt
+            art_api = SamsungTVArt(config['host'])
+            if art_api.supported():
+                _LOGGER.info("Frame TV detected for %s but art mode currently unavailable", config['host'])
+                # Still add the sensors as they might become available later
+                entities = [
+                    ArtModeStatusSensor(coordinator, config_entry),
+                    CurrentArtworkSensor(coordinator, config_entry),
+                ]
+                async_add_entities(entities, True)
+            art_api.close()
+        except Exception as exc:
+            _LOGGER.debug("Could not check Frame TV support for %s: %s", config['host'], exc)
 
 
 class SamsungTVArtSensor(CoordinatorEntity, SamsungTVEntity):
@@ -133,7 +151,9 @@ class SamsungTVArtSensor(CoordinatorEntity, SamsungTVEntity):
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
-        return self.coordinator.last_update_success and self._attr_key in self.coordinator.data
+        return (self.coordinator.last_update_success and
+                (self._attr_key in self.coordinator.data or
+                 self.coordinator.data.get("art_mode_status") is not None))
 
 
 class ArtModeStatusSensor(SamsungTVArtSensor):
@@ -166,8 +186,22 @@ class CurrentArtworkSensor(SamsungTVArtSensor):
     @property
     def native_value(self) -> str | None:
         """Return the name/title of current artwork."""
+        # Check if art mode is on first
+        art_mode_status = self.coordinator.data.get("art_mode_status")
+        if art_mode_status != "on":
+            if art_mode_status == "off":
+                return "Art mode off"
+            elif art_mode_status == "unavailable":
+                return "Art mode unavailable"
+            else:
+                return "Unknown"
+
         artwork_data = self.coordinator.data.get(self._attr_key)
         if artwork_data:
+            # Handle error case
+            if "error" in artwork_data:
+                return "Error loading artwork"
+
             # Try different possible keys for artwork name
             return (
                 artwork_data.get("content_name") or
@@ -175,14 +209,27 @@ class CurrentArtworkSensor(SamsungTVArtSensor):
                 artwork_data.get("name") or
                 "Unknown Artwork"
             )
-        return None
+        return "No artwork info"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return additional state attributes for artwork details."""
         artwork_data = self.coordinator.data.get(self._attr_key)
+        art_mode_status = self.coordinator.data.get("art_mode_status")
+
+        base_attrs = {
+            "art_mode_status": art_mode_status,
+            "is_art_mode": art_mode_status == "on"
+        }
+
         if artwork_data:
-            return {
+            # Handle error case
+            if "error" in artwork_data:
+                base_attrs["error"] = artwork_data["error"]
+                return base_attrs
+
+            # Add artwork details
+            base_attrs.update({
                 "content_id": artwork_data.get("content_id"),
                 "category_id": artwork_data.get("category_id"),
                 "image_url": artwork_data.get("image_url"),
@@ -190,14 +237,15 @@ class CurrentArtworkSensor(SamsungTVArtSensor):
                 "artist": artwork_data.get("artist"),
                 "description": artwork_data.get("description"),
                 "artwork_data": artwork_data  # Full data for advanced users
-            }
-        return None
+            })
+
+        return base_attrs
 
     @property
     def entity_picture(self) -> str | None:
         """Return artwork image for entity picture."""
         artwork_data = self.coordinator.data.get(self._attr_key)
-        if artwork_data:
+        if artwork_data and "error" not in artwork_data:
             # Prefer thumbnail for entity picture to reduce size
             return artwork_data.get("thumbnail_url") or artwork_data.get("image_url")
         return None
