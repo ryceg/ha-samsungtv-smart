@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from numbers import Number
 import socket
-from typing import Any, Dict
+from typing import Any
 
 import voluptuous as vol
 
@@ -186,11 +186,11 @@ class SamsungTVConfigFlow(ConfigFlow, domain=DOMAIN):
                 return True
         return False
 
-    def _remove_stdev_used(self, devices_list: Dict[str, Any]) -> Dict[str, Any]:
+    def _remove_stdev_used(self, devices_list: dict[str, Any]) -> dict[str, Any]:
         """Remove entry already used"""
         res_dev_list = devices_list.copy()
 
-        for dev_id in devices_list.keys():
+        for dev_id in devices_list:
             if self._stdev_already_used(dev_id):
                 res_dev_list.pop(dev_id)
         return res_dev_list

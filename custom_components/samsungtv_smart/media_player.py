@@ -7,7 +7,6 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from enum import Enum
 import logging
-from socket import error as socketError
 from time import sleep
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -1188,7 +1187,7 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
             try:
                 send_magic_packet(self._mac, ip_address=ip_address)
                 send_success = True
-            except socketError as exc:
+            except OSError as exc:
                 _LOGGER.warning(
                     "Failed tentative n.%s to send WOL packet: %s",
                     i,
@@ -1545,8 +1544,7 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
         return video_id
 
     def _cast_youtube_video(self, video_id: str, enqueue: MediaPlayerEnqueue):
-        """
-        Cast a youtube video using samsungcast library.
+        """Cast a youtube video using samsungcast library.
         This method is sync and must run in job executor.
         """
         if enqueue == MediaPlayerEnqueue.PLAY:

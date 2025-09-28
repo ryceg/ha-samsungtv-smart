@@ -1,5 +1,4 @@
-"""
-Samsung TV Art Mode API for Home Assistant Integration
+"""Samsung TV Art Mode API for Home Assistant Integration
 
 Adapted from Samsung TV WS API by Nick Waterton
 Original Copyright (C) 2019 DSR! <xchwarze@gmail.com>
@@ -9,13 +8,10 @@ Original Copyright (C) 2024 Nick Waterton <n.waterton@outlook.com>
 SPDX-License-Identifier: LGPL-3.0
 """
 
-from datetime import datetime
 import json
 import logging
-import random
-import socket
 import ssl
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 import uuid
 
 import websocket
@@ -27,16 +23,19 @@ ART_ENDPOINT = "com.samsung.art-app"
 
 class ArtModeError(Exception):
     """Exception for art mode operations."""
+
     pass
 
 
 class ArtModeTimeoutError(ArtModeError):
     """Timeout error for art mode operations."""
+
     pass
 
 
 class ArtModeResponseError(ArtModeError):
     """Response error for art mode operations."""
+
     pass
 
 
@@ -49,7 +48,7 @@ class SamsungTVArt:
         self.port = port
         self.timeout = timeout
         self.art_uuid = str(uuid.uuid4())
-        self._websocket: Optional[websocket.WebSocket] = None
+        self._websocket: websocket.WebSocket | None = None
 
     def _get_ssl_context(self):
         """Get SSL context for secure connections."""
@@ -58,7 +57,7 @@ class SamsungTVArt:
         context.verify_mode = ssl.CERT_NONE
         return context
 
-    def _process_api_response(self, response: str) -> Dict[str, Any]:
+    def _process_api_response(self, response: str) -> dict[str, Any]:
         """Process API response from TV."""
         try:
             return json.loads(response)
@@ -99,7 +98,7 @@ class SamsungTVArt:
                 pass
             self._websocket = None
 
-    def _send_command(self, command: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _send_command(self, command: dict[str, Any]) -> dict[str, Any] | None:
         """Send command to TV and get response."""
         if not self._websocket:
             if not self._connect():
@@ -150,7 +149,7 @@ class SamsungTVArt:
         except Exception:
             return False
 
-    def get_api_version(self) -> Optional[str]:
+    def get_api_version(self) -> str | None:
         """Get art mode API version."""
         try:
             response = self._send_command({"request": "api_version", "id": self.get_uuid()})
@@ -166,7 +165,7 @@ class SamsungTVArt:
                 pass
         return None
 
-    def get_artmode_status(self) -> Optional[str]:
+    def get_artmode_status(self) -> str | None:
         """Get current art mode status."""
         try:
             response = self._send_command({
@@ -179,7 +178,7 @@ class SamsungTVArt:
             _LOGGING.error("Error getting art mode status: %s", exc)
         return None
 
-    def get_current_artwork(self) -> Optional[Dict[str, Any]]:
+    def get_current_artwork(self) -> dict[str, Any] | None:
         """Get currently displayed artwork info."""
         try:
             response = self._send_command({
@@ -191,7 +190,7 @@ class SamsungTVArt:
             _LOGGING.error("Error getting current artwork: %s", exc)
         return None
 
-    def get_brightness(self) -> Optional[int]:
+    def get_brightness(self) -> int | None:
         """Get art mode brightness (0-100)."""
         try:
             response = self._send_command({
@@ -216,7 +215,7 @@ class SamsungTVArt:
                 _LOGGING.error("Error getting brightness: %s", exc)
         return None
 
-    def get_color_temperature(self) -> Optional[int]:
+    def get_color_temperature(self) -> int | None:
         """Get art mode color temperature."""
         try:
             response = self._send_command({
@@ -241,7 +240,7 @@ class SamsungTVArt:
                 _LOGGING.error("Error getting color temperature: %s", exc)
         return None
 
-    def get_available_artworks(self, category: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_available_artworks(self, category: str | None = None) -> list[dict[str, Any]]:
         """Get list of available artworks."""
         try:
             response = self._send_command({
@@ -258,7 +257,7 @@ class SamsungTVArt:
             _LOGGING.error("Error getting available artworks: %s", exc)
         return []
 
-    def get_slideshow_status(self) -> Optional[Dict[str, Any]]:
+    def get_slideshow_status(self) -> dict[str, Any] | None:
         """Get slideshow status."""
         try:
             response = self._send_command({

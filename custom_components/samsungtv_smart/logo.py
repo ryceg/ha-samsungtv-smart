@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 import re
 import traceback
-from typing import Optional
 
 import aiofiles
 from aiofiles import os as aiopath
@@ -106,8 +105,7 @@ class LocalImageUrl:
 
 
 class Logo:
-    """
-    Class that fetches logos for Samsung TV Tizen.
+    """Class that fetches logos for Samsung TV Tizen.
     Works with https://github.com/jaruba/channel-logos.
     """
 
@@ -115,7 +113,7 @@ class Logo:
         self,
         logo_option: LogoOption,
         logo_file_download: str = None,
-        session: Optional[aiohttp.ClientSession] = None,
+        session: aiohttp.ClientSession | None = None,
     ):
         self._media_image_base_url = None
         self._logo_option = None
@@ -255,7 +253,7 @@ class Logo:
             return
 
         try:
-            async with aiofiles.open(logo_file, "r") as f:
+            async with aiofiles.open(logo_file) as f:
                 image_paths = json.loads(await f.read())
         except Exception as exc:  # pylint: disable=broad-except
             _LOGGER.warning("Failed to read logo paths file %s: %s", logo_file, exc)

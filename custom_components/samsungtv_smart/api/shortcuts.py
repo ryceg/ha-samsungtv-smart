@@ -1,5 +1,4 @@
-"""
-SamsungTVWS - Samsung Smart TV WS API wrapper
+"""SamsungTVWS - Samsung Smart TV WS API wrapper
 
 Copyright (C) 2019 Xchwarze
 

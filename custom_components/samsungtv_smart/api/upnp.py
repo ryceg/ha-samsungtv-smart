@@ -1,7 +1,6 @@
 """Smartthings TV integration UPnP implementation."""
 
 import logging
-from typing import Optional
 import xml.etree.ElementTree as ET
 
 from aiohttp import ClientSession
@@ -15,7 +14,7 @@ _LOGGER = logging.getLogger(__name__)
 class SamsungUPnP:
     """UPnP implementation for Samsung TV."""
 
-    def __init__(self, host, session: Optional[ClientSession] = None):
+    def __init__(self, host, session: ClientSession | None = None):
         """Initialize the class."""
         self._host = host
         self._connected = False
@@ -44,15 +43,14 @@ class SamsungUPnP:
                     </s:Body>
                 </s:Envelope>"""
         try:
-            async with async_timeout.timeout(timeout):
-                async with self._session.post(
-                    f"http://{self._host}:9197/upnp/control/{protocole}1",
-                    headers=headers,
-                    data=body,
-                    raise_for_status=True,
-                ) as resp:
-                    response = await resp.content.read()
-                    self._connected = True
+            async with async_timeout.timeout(timeout), self._session.post(
+                f"http://{self._host}:9197/upnp/control/{protocole}1",
+                headers=headers,
+                data=body,
+                raise_for_status=True,
+            ) as resp:
+                response = await resp.content.read()
+                self._connected = True
         except Exception as exc:  # pylint: disable=broad-except
             _LOGGER.debug(exc)
             self._connected = False
