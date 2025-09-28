@@ -7,7 +7,6 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from enum import Enum
 import logging
-from socket import error as socketError
 from time import sleep
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -94,6 +93,7 @@ from .const import (
     LOCAL_LOGO_PATH,
     MAX_WOL_REPEAT,
     SERVICE_SELECT_PICTURE_MODE,
+    SERVICE_SELECT_ART_PICTURE,
     SERVICE_SET_ART_MODE,
     SIGNAL_CONFIG_ENTITY,
     STD_APP_LIST,
@@ -106,6 +106,7 @@ from .entity import SamsungTVEntity
 from .logo import LOGO_OPTION_DEFAULT, LocalImageUrl, Logo, LogoOption
 
 ATTR_ART_MODE_STATUS = "art_mode_status"
+ATTR_ART_PICTURE = "art_picture"
 ATTR_IP_ADDRESS = "ip_address"
 ATTR_PICTURE_MODE = "picture_mode"
 ATTR_PICTURE_MODE_LIST = "picture_mode_list"
@@ -202,6 +203,11 @@ async def async_setup_entry(
         SERVICE_SET_ART_MODE,
         {},
         "async_set_art_mode",
+    )
+    platform.async_register_entity_service(
+        SERVICE_SELECT_ART_PICTURE,
+        {vol.Required(ATTR_ART_PICTURE): cv.string},
+        "async_select_art_picture",
     )
 
 
@@ -1188,7 +1194,7 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
             try:
                 send_magic_packet(self._mac, ip_address=ip_address)
                 send_success = True
-            except socketError as exc:
+            except OSError as exc:
                 _LOGGER.warning(
                     "Failed tentative n.%s to send WOL packet: %s",
                     i,
@@ -1264,6 +1270,78 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
             await self.async_send_command("KEY_POWER")
         elif self.support_art_mode == ArtModeSupport.FULL:
             await self._async_turn_on(True)
+
+    async def async_select_art_picture(self, art_picture: str):
+        """Select a specific art picture/artwork."""
+        if self.support_art_mode == ArtModeSupport.UNSUPPORTED:
+            raise NotImplementedError("Art mode not supported on this TV")
+
+        # Import the SamsungTVArt API for artwork control
+        from .api.art import SamsungTVArt, ArtModeError
+
+        art_api = None
+        try:
+            # Create art API instance
+            art_api = SamsungTVArt(
+                host=self._host,
+                port=8001,
+                timeout=10
+            )
+
+            # First ensure we're in art mode
+            if self._ws.artmode_status != ArtModeStatus.On:
+                await self.async_set_art_mode()
+                # Wait a bit for art mode to activate
+                await asyncio.sleep(2)
+
+            # Set the artwork - the art_picture parameter could be:
+            # - A content ID
+            # - An artwork name
+            # - A category/content combination
+            success = False
+
+            # Try as direct content ID first
+            if art_picture.isdigit() or "_" in art_picture:
+                success = await self.hass.async_add_executor_job(
+                    art_api.set_current_artwork,
+                    art_picture
+                )
+
+            # If that doesn't work, try to find artwork by name
+            if not success:
+                artworks = await self.hass.async_add_executor_job(
+                    art_api.get_available_artworks
+                )
+
+                # Search for artwork by name
+                matching_artwork = None
+                for artwork in artworks:
+                    if (artwork.get("content_name", "").lower() == art_picture.lower() or
+                        artwork.get("title", "").lower() == art_picture.lower() or
+                        artwork.get("name", "").lower() == art_picture.lower()):
+                        matching_artwork = artwork
+                        break
+
+                if matching_artwork:
+                    content_id = matching_artwork.get("content_id")
+                    if content_id:
+                        success = await self.hass.async_add_executor_job(
+                            art_api.set_current_artwork,
+                            content_id
+                        )
+
+            if not success:
+                _LOGGER.warning("Could not find or set artwork: %s", art_picture)
+
+        except ArtModeError as exc:
+            _LOGGER.error("Art mode error selecting picture: %s", exc)
+            raise
+        except Exception as exc:
+            _LOGGER.error("Unexpected error selecting art picture: %s", exc)
+            raise
+        finally:
+            if art_api:
+                art_api.close()
 
     def _turn_off(self):
         """Turn off media player."""
@@ -1545,8 +1623,7 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
         return video_id
 
     def _cast_youtube_video(self, video_id: str, enqueue: MediaPlayerEnqueue):
-        """
-        Cast a youtube video using samsungcast library.
+        """Cast a youtube video using samsungcast library.
         This method is sync and must run in job executor.
         """
         if enqueue == MediaPlayerEnqueue.PLAY:
