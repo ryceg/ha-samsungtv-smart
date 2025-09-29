@@ -265,6 +265,7 @@ class SamsungTVWS:
 
         self.connection = None
         self._artmode_status = ArtModeStatus.Unsupported
+        self._artmode_supported = None  # Cache for art mode support status
         self._power_on_requested = False
         self._power_on_requested_time = datetime.min
         self._power_on_delay = DEFAULT_POWER_ON_DELAY
@@ -801,14 +802,17 @@ class SamsungTVWS:
             return
         data = _process_api_response(data_str)
         event = data.get("event", "")
+        _LOGGING.debug("Processing art mode event: %s, data: %s", event, data)
+
         if event == "art_mode_changed":
             status = data.get("status", "")
             if status == "on":
                 artmode_status = ArtModeStatus.On
             else:
                 artmode_status = ArtModeStatus.Off
-        elif event == "artmode_status":
+        elif event == "artmode_status" or event == "get_artmode_status":
             value = data.get("value", "")
+            _LOGGING.debug("Art mode status value: %s", value)
             if value == "on":
                 artmode_status = ArtModeStatus.On
             else:
@@ -820,6 +824,7 @@ class SamsungTVWS:
             return
         else:
             # Unknown message
+            _LOGGING.debug("Unknown art mode event: %s", event)
             return
 
         if self._power_on_requested and artmode_status != ArtModeStatus.Unavailable:
@@ -830,6 +835,7 @@ class SamsungTVWS:
             self._power_on_requested = False
 
         self._artmode_status = artmode_status
+        _LOGGING.debug("Art mode status updated to: %s", artmode_status)
 
     @property
     def is_connected(self):
@@ -1200,6 +1206,11 @@ class SamsungTVWS:
         """Install a new app using rest api call."""
         _LOGGING.debug("Install app %s via rest api", app_id)
         return self._rest_request("applications/" + app_id, "PUT")
+
+    def art_mode_supported(self) -> bool:
+        """Return cached art mode support status."""
+        return self._artmode_supported is True
+
 
     def shortcuts(self):
         """Return a list of available shortcuts."""

@@ -35,6 +35,7 @@ __min_ha_version__ = f"{MIN_HA_MAJ_VER}.{MIN_HA_MIN_VER}.0"
 DATA_CFG = "cfg"
 DATA_CFG_YAML = "cfg_yaml"
 DATA_OPTIONS = "options"
+DATA_WS = "ws"  # Shared WebSocket connection
 LOCAL_LOGO_PATH = "local_logo_path"
 WS_PREFIX = "[Home Assistant]"
 

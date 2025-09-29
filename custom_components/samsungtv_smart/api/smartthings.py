@@ -427,7 +427,7 @@ class SmartThingsTV:
         ) as resp:
             health = await resp.json()
 
-        _LOGGER.debug(health)
+        # _LOGGER.debug(health)
 
         if health["state"] == "ONLINE":
             return True
@@ -477,7 +477,7 @@ class SmartThingsTV:
         ) as resp:
             data = await resp.json()
 
-        _LOGGER.debug(data)
+        # _LOGGER.debug(data)
 
         dev_data = data.get("main", {})
         # device_state = data['main']['switch']['value']

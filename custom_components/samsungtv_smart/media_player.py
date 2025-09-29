@@ -86,6 +86,7 @@ from .const import (
     CONF_WS_NAME,
     DATA_CFG,
     DATA_OPTIONS,
+    DATA_WS,
     DEFAULT_APP,
     DEFAULT_PORT,
     DEFAULT_SOURCE_LIST,
@@ -784,8 +785,14 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
 
         try:
             device_info: dict[str, Any] = await self._rest_api.async_rest_device_info()
-            _LOGGER.debug("Device info on %s is: %s", self._host, device_info)
+            # _LOGGER.debug("Device info on %s is: %s", self._host, device_info)
             self._device_info = device_info
+
+            # Detect and cache art mode support
+            if device_info and self._ws._artmode_supported is None:
+                frame_tv_support = device_info.get("device", {}).get("FrameTVSupport") == "true"
+                self._ws._artmode_supported = frame_tv_support
+                _LOGGER.debug("Art mode support detected: %s", frame_tv_support)
         except Exception as ex:  # pylint: disable=broad-except
             _LOGGER.debug("Error retrieving device info on %s: %s", self._host, ex)
             return None
@@ -1058,9 +1065,20 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
     def extra_state_attributes(self):
         """Return the optional state attributes."""
         data = {ATTR_IP_ADDRESS: self._host}
-        if self._ws.artmode_status != ArtModeStatus.Unsupported:
-            status_on = self._ws.artmode_status == ArtModeStatus.On
-            data.update({ATTR_ART_MODE_STATUS: STATE_ON if status_on else STATE_OFF})
+        # Add art mode support detection and status
+        art_mode_supported = self._ws.art_mode_supported()
+        data.update({"art_mode_supported": art_mode_supported})
+
+        if art_mode_supported:
+            if self._ws.artmode_status == ArtModeStatus.On:
+                data.update({ATTR_ART_MODE_STATUS: STATE_ON})
+            elif self._ws.artmode_status == ArtModeStatus.Off:
+                data.update({ATTR_ART_MODE_STATUS: STATE_OFF})
+            elif self._ws.artmode_status == ArtModeStatus.Unavailable:
+                data.update({ATTR_ART_MODE_STATUS: "unavailable"})
+            elif self._ws.artmode_status == ArtModeStatus.Unsupported:
+                # Art mode is supported but WebSocket hasn't connected yet
+                data.update({ATTR_ART_MODE_STATUS: "unavailable"})
         if self._st:
             picture_mode = self._st.picture_mode
             picture_mode_list = self._st.picture_mode_list
