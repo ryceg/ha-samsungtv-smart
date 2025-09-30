@@ -94,6 +94,7 @@ class ArtModeImageEntity(SamsungTVEntity, ImageEntity):
         # Initialize ImageEntity with required hass parameter
         ImageEntity.__init__(self, hass)
 
+        self._entry_id = entry_id
         self._media_player_entity_id = media_player_entity_id
         self._attr_unique_id = f"{self.unique_id}_art_image"
         self._last_artwork_id = None
