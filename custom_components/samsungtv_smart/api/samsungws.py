@@ -296,7 +296,8 @@ class SamsungTVWS:
         self._ws_art = None
         self._client_art = None
         self._last_art_ping = datetime.min
-        self._client_art_supported = 2
+        self._client_art_enabled = True  # Enable art mode thread by default
+        self._current_artwork = None  # Store current artwork info
 
         self._ping = Ping(self.host)
         self._status_callback = None
@@ -817,6 +818,11 @@ class SamsungTVWS:
                 artmode_status = ArtModeStatus.On
             else:
                 artmode_status = ArtModeStatus.Off
+        elif event == "current_artwork" or event == "get_current_artwork":
+            # Store current artwork information
+            self._current_artwork = data
+            _LOGGING.debug("Current artwork updated: %s", data)
+            return
         elif event == "go_to_standby":
             artmode_status = ArtModeStatus.Unavailable
         elif event == "wakeup":
@@ -1004,15 +1010,15 @@ class SamsungTVWS:
                 self._client_control.daemon = True
                 self._client_control.start()
 
-            if self._client_art_supported > 0 and (
+            if self._client_art_enabled and (
                 self._client_art is None or not self._client_art.is_alive()
             ):
-                if self._client_art_supported > 1:
-                    self._client_art_supported = 0
-                self._client_art = Thread(target=self._client_art_thread)
-                self._client_art.name = "SamsungArt"
-                self._client_art.daemon = True
-                self._client_art.start()
+                # Only try to start art thread if we know or suspect Frame TV support
+                if self._artmode_supported is not False:
+                    self._client_art = Thread(target=self._client_art_thread)
+                    self._client_art.name = "SamsungArt"
+                    self._client_art.daemon = True
+                    self._client_art.start()
 
     def stop_client(self):
         """Stop the ws remote client thread."""
@@ -1210,6 +1216,49 @@ class SamsungTVWS:
     def art_mode_supported(self) -> bool:
         """Return cached art mode support status."""
         return self._artmode_supported is True
+
+    def get_artmode(self) -> str | None:
+        """Get current art mode status (on/off)."""
+        if self._artmode_status == ArtModeStatus.On:
+            return "on"
+        elif self._artmode_status == ArtModeStatus.Off:
+            return "off"
+        return None
+
+    def get_current_artwork(self) -> dict | None:
+        """Get currently displayed artwork information."""
+        return self._current_artwork
+
+    def request_current_artwork(self) -> bool:
+        """Request current artwork information via art websocket."""
+        if not self._ws_art or self._artmode_status != ArtModeStatus.On:
+            _LOGGING.debug("Cannot request artwork: ws_art=%s, status=%s",
+                          bool(self._ws_art), self._artmode_status)
+            return False
+
+        try:
+            msg_data = {
+                "request": "get_current_artwork",
+                "id": gen_uuid(),
+            }
+            self._ws_send(
+                {
+                    "method": "ms.channel.emit",
+                    "params": {
+                        "data": json.dumps(msg_data),
+                        "to": "host",
+                        "event": "art_app_request",
+                    },
+                },
+                key_press_delay=0,
+                use_control=True,
+                ws_socket=self._ws_art,
+            )
+            _LOGGING.debug("Requested current artwork info")
+            return True
+        except Exception as exc:
+            _LOGGING.error("Error requesting current artwork: %s", exc)
+            return False
 
 
     def shortcuts(self):

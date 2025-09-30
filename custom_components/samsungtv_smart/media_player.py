@@ -788,11 +788,14 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
             # _LOGGER.debug("Device info on %s is: %s", self._host, device_info)
             self._device_info = device_info
 
-            # Detect and cache art mode support
+            # Detect and cache art mode support from device info
             if device_info and self._ws._artmode_supported is None:
                 frame_tv_support = device_info.get("device", {}).get("FrameTVSupport") == "true"
                 self._ws._artmode_supported = frame_tv_support
-                _LOGGER.debug("Art mode support detected: %s", frame_tv_support)
+                if frame_tv_support:
+                    _LOGGER.info("Frame TV detected - art mode supported")
+                else:
+                    _LOGGER.debug("Art mode not supported on this TV")
         except Exception as ex:  # pylint: disable=broad-except
             _LOGGER.debug("Error retrieving device info on %s: %s", self._host, ex)
             return None
@@ -1072,6 +1075,13 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
         if art_mode_supported:
             if self._ws.artmode_status == ArtModeStatus.On:
                 data.update({ATTR_ART_MODE_STATUS: STATE_ON})
+                # Request current artwork info if in art mode
+                current_artwork = self._ws.get_current_artwork()
+                if not current_artwork:
+                    self._ws.request_current_artwork()
+                else:
+                    # Expose current artwork data
+                    data.update({"current_artwork": current_artwork})
             elif self._ws.artmode_status == ArtModeStatus.Off:
                 data.update({ATTR_ART_MODE_STATUS: STATE_OFF})
             elif self._ws.artmode_status == ArtModeStatus.Unavailable:

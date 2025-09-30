@@ -151,8 +151,16 @@ class ArtModeStatusSensor(SamsungTVEntity, SensorEntity):
             return None
 
         value = self.native_value
-        return {
+        attrs = {
             "is_art_mode": value == "on",
             "is_available": value != "unavailable",
             "media_player_entity_id": self._media_player_entity_id,
         }
+
+        # Add current artwork info if available from media player
+        current_artwork = media_player_state.attributes.get("current_artwork")
+        if current_artwork and isinstance(current_artwork, dict):
+            # Expose artwork data fields for automations/scripts
+            attrs["current_artwork"] = current_artwork
+
+        return attrs
