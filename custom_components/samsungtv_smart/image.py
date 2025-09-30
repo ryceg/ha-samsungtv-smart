@@ -62,8 +62,8 @@ async def async_setup_entry(
             return
 
         # Create art mode image entity
-        entity = ArtModeImageEntity(config, config_entry.entry_id, media_player_entity_id)
-        async_add_entities([entity], True)
+        entity = ArtModeImageEntity(hass, config, config_entry.entry_id, media_player_entity_id)
+        async_add_entities([entity])
         _LOGGER.debug(
             "Successfully set up art mode image for %s",
             config.get(CONF_HOST, "unknown")
@@ -83,14 +83,16 @@ class ArtModeImageEntity(SamsungTVEntity, ImageEntity):
 
     def __init__(
         self,
+        hass: HomeAssistant,
         config: dict[str, Any],
         entry_id: str,
         media_player_entity_id: str,
     ) -> None:
         """Initialize the image entity."""
-        # Initialize SamsungTVEntity first
+        # Initialize SamsungTVEntity
         SamsungTVEntity.__init__(self, config, entry_id)
-        # Don't call ImageEntity.__init__ - it will be handled via MRO
+        # Initialize ImageEntity with required hass parameter
+        ImageEntity.__init__(self, hass)
 
         self._media_player_entity_id = media_player_entity_id
         self._attr_unique_id = f"{self.unique_id}_art_image"
