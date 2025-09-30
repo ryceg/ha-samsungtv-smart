@@ -204,6 +204,36 @@ async def async_setup_entry(
         {},
         "async_set_art_mode",
     )
+    platform.async_register_entity_service(
+        "select_artwork",
+        {
+            vol.Required("artwork_id"): cv.string,
+            vol.Optional("show", default=True): cv.boolean,
+        },
+        "async_select_artwork",
+    )
+    platform.async_register_entity_service(
+        "upload_artwork",
+        {
+            vol.Required("file_path"): cv.string,
+            vol.Optional("file_type", default="PNG"): vol.In(["PNG", "JPEG"]),
+            vol.Optional("matte"): cv.string,
+        },
+        "async_upload_artwork",
+    )
+    platform.async_register_entity_service(
+        "delete_artwork",
+        {vol.Required("artwork_id"): cv.string},
+        "async_delete_artwork",
+    )
+    platform.async_register_entity_service(
+        "set_photo_filter",
+        {
+            vol.Required("artwork_id"): cv.string,
+            vol.Required("filter"): cv.string,
+        },
+        "async_set_photo_filter",
+    )
 
 
 def _get_default_app_info(app_id):
@@ -1292,6 +1322,61 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
             await self.async_send_command("KEY_POWER")
         elif self.support_art_mode == ArtModeSupport.FULL:
             await self._async_turn_on(True)
+
+    async def async_select_artwork(self, artwork_id: str, show: bool = True) -> None:
+        """Select and display a specific artwork."""
+        if not self._ws.art_mode_supported():
+            _LOGGER.error("Art mode not supported on this TV")
+            return
+
+        await self.hass.async_add_executor_job(
+            self._ws.select_artwork, artwork_id, show
+        )
+        _LOGGER.info("Selected artwork %s on %s", artwork_id, self.name)
+
+    async def async_upload_artwork(
+        self, file_path: str, file_type: str = "PNG", matte: str | None = None
+    ) -> None:
+        """Upload a custom artwork image."""
+        if not self._ws.art_mode_supported():
+            _LOGGER.error("Art mode not supported on this TV")
+            return
+
+        try:
+            # Read the image file
+            with open(file_path, "rb") as f:
+                image_data = f.read()
+
+            await self.hass.async_add_executor_job(
+                self._ws.upload_artwork, image_data, file_type, matte
+            )
+            _LOGGER.info("Uploaded artwork from %s to %s", file_path, self.name)
+        except FileNotFoundError:
+            _LOGGER.error("Image file not found: %s", file_path)
+        except Exception as exc:
+            _LOGGER.error("Error uploading artwork: %s", exc)
+
+    async def async_delete_artwork(self, artwork_id: str) -> None:
+        """Delete an uploaded artwork."""
+        if not self._ws.art_mode_supported():
+            _LOGGER.error("Art mode not supported on this TV")
+            return
+
+        await self.hass.async_add_executor_job(
+            self._ws.delete_artwork, artwork_id
+        )
+        _LOGGER.info("Deleted artwork %s from %s", artwork_id, self.name)
+
+    async def async_set_photo_filter(self, artwork_id: str, filter: str) -> None:
+        """Apply a photo filter to an artwork."""
+        if not self._ws.art_mode_supported():
+            _LOGGER.error("Art mode not supported on this TV")
+            return
+
+        await self.hass.async_add_executor_job(
+            self._ws.set_photo_filter, artwork_id, filter
+        )
+        _LOGGER.info("Applied filter '%s' to artwork %s on %s", filter, artwork_id, self.name)
 
     def _turn_off(self):
         """Turn off media player."""

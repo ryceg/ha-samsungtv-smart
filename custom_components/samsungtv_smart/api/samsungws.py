@@ -298,6 +298,7 @@ class SamsungTVWS:
         self._last_art_ping = datetime.min
         self._client_art_enabled = True  # Enable art mode thread by default
         self._current_artwork = None  # Store current artwork info
+        self._artwork_thumbnails: dict[str, bytes] = {}  # Cache for artwork thumbnails
 
         self._ping = Ping(self.host)
         self._status_callback = None
@@ -823,6 +824,20 @@ class SamsungTVWS:
             self._current_artwork = data
             _LOGGING.debug("Current artwork updated: %s", data)
             return
+        elif event == "thumbnail" or event == "get_thumbnail":
+            # Store thumbnail image data
+            content_id = data.get("content_id")
+            image_data = data.get("image_data")
+            if content_id and image_data:
+                try:
+                    # Decode base64 image data
+                    thumbnail_bytes = base64.b64decode(image_data)
+                    self._artwork_thumbnails[content_id] = thumbnail_bytes
+                    _LOGGING.debug("Stored thumbnail for artwork: %s (%d bytes)",
+                                  content_id, len(thumbnail_bytes))
+                except Exception as exc:
+                    _LOGGING.error("Error decoding thumbnail data: %s", exc)
+            return
         elif event == "go_to_standby":
             artmode_status = ArtModeStatus.Unavailable
         elif event == "wakeup":
@@ -1258,6 +1273,273 @@ class SamsungTVWS:
             return True
         except Exception as exc:
             _LOGGING.error("Error requesting current artwork: %s", exc)
+            return False
+
+    def get_available_artworks(self, category: str | None = None) -> list[dict]:
+        """Get list of available artworks."""
+        if not self._ws_art:
+            _LOGGING.debug("Cannot get artworks: art websocket not connected")
+            return []
+
+        try:
+            msg_data = {
+                "request": "get_content_list",
+                "id": gen_uuid(),
+            }
+            if category:
+                msg_data["category"] = category
+
+            self._ws_send(
+                {
+                    "method": "ms.channel.emit",
+                    "params": {
+                        "data": json.dumps(msg_data),
+                        "to": "host",
+                        "event": "art_app_request",
+                    },
+                },
+                key_press_delay=0,
+                use_control=True,
+                ws_socket=self._ws_art,
+            )
+            _LOGGING.debug("Requested available artworks")
+            # Response will be handled in _handle_artmode_status
+            return []
+        except Exception as exc:
+            _LOGGING.error("Error getting available artworks: %s", exc)
+            return []
+
+    def select_artwork(self, artwork_id: str, show: bool = True) -> bool:
+        """Select and display a specific artwork."""
+        if not self._ws_art:
+            _LOGGING.debug("Cannot select artwork: art websocket not connected")
+            return False
+
+        try:
+            msg_data = {
+                "request": "select_image",
+                "content_id": artwork_id,
+                "show": show,
+                "id": gen_uuid(),
+            }
+            self._ws_send(
+                {
+                    "method": "ms.channel.emit",
+                    "params": {
+                        "data": json.dumps(msg_data),
+                        "to": "host",
+                        "event": "art_app_request",
+                    },
+                },
+                key_press_delay=0,
+                use_control=True,
+                ws_socket=self._ws_art,
+            )
+            _LOGGING.info("Selected artwork: %s (show=%s)", artwork_id, show)
+            return True
+        except Exception as exc:
+            _LOGGING.error("Error selecting artwork %s: %s", artwork_id, exc)
+            return False
+
+    def get_artwork_thumbnail(self, artwork_id: str) -> bytes | None:
+        """Get thumbnail image for a specific artwork."""
+        # Check cache first
+        if artwork_id in self._artwork_thumbnails:
+            _LOGGING.debug("Returning cached thumbnail for artwork: %s", artwork_id)
+            return self._artwork_thumbnails[artwork_id]
+
+        if not self._ws_art:
+            _LOGGING.debug("Cannot get thumbnail: art websocket not connected")
+            return None
+
+        try:
+            msg_data = {
+                "request": "get_thumbnail",
+                "content_id": artwork_id,
+                "id": gen_uuid(),
+            }
+            self._ws_send(
+                {
+                    "method": "ms.channel.emit",
+                    "params": {
+                        "data": json.dumps(msg_data),
+                        "to": "host",
+                        "event": "art_app_request",
+                    },
+                },
+                key_press_delay=0,
+                use_control=True,
+                ws_socket=self._ws_art,
+            )
+            _LOGGING.debug("Requested thumbnail for artwork: %s", artwork_id)
+            # Thumbnail data will come via websocket response and be stored in cache
+            # Return None for now - caller should retry after a brief delay
+            return None
+        except Exception as exc:
+            _LOGGING.error("Error getting thumbnail for %s: %s", artwork_id, exc)
+            return None
+
+    def upload_artwork(self, data: bytes, file_type: str = "PNG", matte: str | None = None) -> bool:
+        """Upload a custom artwork image."""
+        if not self._ws_art:
+            _LOGGING.debug("Cannot upload artwork: art websocket not connected")
+            return False
+
+        try:
+            msg_data = {
+                "request": "send_image",
+                "file_type": file_type,
+                "conn_info": {
+                    "d2d_mode": "socket",
+                    "connection_id": gen_uuid(),
+                },
+                "image_data": base64.b64encode(data).decode("utf-8"),
+                "id": gen_uuid(),
+            }
+            if matte:
+                msg_data["matte"] = matte
+
+            self._ws_send(
+                {
+                    "method": "ms.channel.emit",
+                    "params": {
+                        "data": json.dumps(msg_data),
+                        "to": "host",
+                        "event": "art_app_request",
+                    },
+                },
+                key_press_delay=0,
+                use_control=True,
+                ws_socket=self._ws_art,
+            )
+            _LOGGING.info("Uploaded artwork: type=%s, size=%d bytes", file_type, len(data))
+            return True
+        except Exception as exc:
+            _LOGGING.error("Error uploading artwork: %s", exc)
+            return False
+
+    def delete_artwork(self, artwork_id: str) -> bool:
+        """Delete an uploaded artwork."""
+        if not self._ws_art:
+            _LOGGING.debug("Cannot delete artwork: art websocket not connected")
+            return False
+
+        try:
+            msg_data = {
+                "request": "delete_image",
+                "content_id": artwork_id,
+                "id": gen_uuid(),
+            }
+            self._ws_send(
+                {
+                    "method": "ms.channel.emit",
+                    "params": {
+                        "data": json.dumps(msg_data),
+                        "to": "host",
+                        "event": "art_app_request",
+                    },
+                },
+                key_press_delay=0,
+                use_control=True,
+                ws_socket=self._ws_art,
+            )
+            _LOGGING.info("Deleted artwork: %s", artwork_id)
+            return True
+        except Exception as exc:
+            _LOGGING.error("Error deleting artwork %s: %s", artwork_id, exc)
+            return False
+
+    def delete_artwork_list(self, artwork_ids: list[str]) -> bool:
+        """Delete multiple uploaded artworks."""
+        if not self._ws_art:
+            _LOGGING.debug("Cannot delete artworks: art websocket not connected")
+            return False
+
+        try:
+            msg_data = {
+                "request": "delete_image_list",
+                "content_id_list": artwork_ids,
+                "id": gen_uuid(),
+            }
+            self._ws_send(
+                {
+                    "method": "ms.channel.emit",
+                    "params": {
+                        "data": json.dumps(msg_data),
+                        "to": "host",
+                        "event": "art_app_request",
+                    },
+                },
+                key_press_delay=0,
+                use_control=True,
+                ws_socket=self._ws_art,
+            )
+            _LOGGING.info("Deleted %d artworks", len(artwork_ids))
+            return True
+        except Exception as exc:
+            _LOGGING.error("Error deleting artwork list: %s", exc)
+            return False
+
+    def get_photo_filter_list(self) -> list[str]:
+        """Get list of available photo filters."""
+        if not self._ws_art:
+            _LOGGING.debug("Cannot get filters: art websocket not connected")
+            return []
+
+        try:
+            msg_data = {
+                "request": "get_photo_filter_list",
+                "id": gen_uuid(),
+            }
+            self._ws_send(
+                {
+                    "method": "ms.channel.emit",
+                    "params": {
+                        "data": json.dumps(msg_data),
+                        "to": "host",
+                        "event": "art_app_request",
+                    },
+                },
+                key_press_delay=0,
+                use_control=True,
+                ws_socket=self._ws_art,
+            )
+            _LOGGING.debug("Requested photo filter list")
+            return []
+        except Exception as exc:
+            _LOGGING.error("Error getting photo filter list: %s", exc)
+            return []
+
+    def set_photo_filter(self, artwork_id: str, filter_name: str) -> bool:
+        """Apply a photo filter to an artwork."""
+        if not self._ws_art:
+            _LOGGING.debug("Cannot set filter: art websocket not connected")
+            return False
+
+        try:
+            msg_data = {
+                "request": "set_photo_filter",
+                "content_id": artwork_id,
+                "filter": filter_name,
+                "id": gen_uuid(),
+            }
+            self._ws_send(
+                {
+                    "method": "ms.channel.emit",
+                    "params": {
+                        "data": json.dumps(msg_data),
+                        "to": "host",
+                        "event": "art_app_request",
+                    },
+                },
+                key_press_delay=0,
+                use_control=True,
+                ws_socket=self._ws_art,
+            )
+            _LOGGING.info("Set filter '%s' on artwork: %s", filter_name, artwork_id)
+            return True
+        except Exception as exc:
+            _LOGGING.error("Error setting filter on %s: %s", artwork_id, exc)
             return False
 
 

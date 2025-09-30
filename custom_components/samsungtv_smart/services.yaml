@@ -31,3 +31,95 @@ set_art_mode:
       selector:
         entity:
           integration: samsungtv_smart
+
+select_artwork:
+  name: Select Artwork
+  description: Display a specific artwork on The Frame TV.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: media_player
+  fields:
+    artwork_id:
+      name: Artwork ID
+      description: ID of artwork to display (e.g., 'SAM-F0206')
+      required: true
+      example: "SAM-F0206"
+      selector:
+        text:
+    show:
+      name: Show Immediately
+      description: Whether to display artwork immediately
+      default: true
+      selector:
+        boolean:
+
+upload_artwork:
+  name: Upload Artwork
+  description: Upload a custom image to The Frame TV.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: media_player
+  fields:
+    file_path:
+      name: File Path
+      description: Path to image file (PNG or JPEG)
+      required: true
+      example: "/config/www/my_art.png"
+      selector:
+        text:
+    file_type:
+      name: File Type
+      description: Image format
+      default: "PNG"
+      selector:
+        select:
+          options:
+            - "PNG"
+            - "JPEG"
+    matte:
+      name: Matte Color
+      description: Optional matte color (e.g., 'modern_apricot')
+      example: "modern_apricot"
+      selector:
+        text:
+
+delete_artwork:
+  name: Delete Artwork
+  description: Remove uploaded artwork from The Frame TV.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: media_player
+  fields:
+    artwork_id:
+      name: Artwork ID
+      description: ID of uploaded artwork to delete (e.g., 'MY-F0020')
+      required: true
+      example: "MY-F0020"
+      selector:
+        text:
+
+set_photo_filter:
+  name: Set Photo Filter
+  description: Apply a filter effect to artwork.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: media_player
+  fields:
+    artwork_id:
+      name: Artwork ID
+      description: ID of artwork to apply filter to
+      required: true
+      example: "SAM-F0206"
+      selector:
+        text:
+    filter:
+      name: Filter Name
+      description: Filter effect to apply (e.g., 'ink', 'watercolor')
+      required: true
+      example: "ink"
+      selector:
+        text:
