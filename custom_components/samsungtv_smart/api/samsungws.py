@@ -28,6 +28,7 @@ from datetime import datetime
 from enum import Enum
 import json
 import logging
+import random
 import socket
 import ssl
 import subprocess
@@ -837,22 +838,26 @@ class SamsungTVWS:
                 self._status_callback()
             return
         elif event == "thumbnail" or event == "get_thumbnail":
-            # Store thumbnail image data
-            _LOGGING.debug("Received thumbnail event: %s", event)
+            # Received connection info for thumbnail download
+            _LOGGING.debug("Received thumbnail connection info: %s", data)
             content_id = data.get("content_id")
-            image_data = data.get("image_data")
-            if content_id and image_data:
+            conn_info_str = data.get("conn_info")
+
+            if content_id and conn_info_str:
                 try:
-                    # Decode base64 image data
-                    thumbnail_bytes = base64.b64decode(image_data)
-                    self._artwork_thumbnails[content_id] = thumbnail_bytes
-                    _LOGGING.debug("Stored thumbnail for artwork: %s (%d bytes)",
-                                  content_id, len(thumbnail_bytes))
-                    # Notify that thumbnail is available
-                    if self._status_callback:
-                        self._status_callback()
+                    # Parse connection info
+                    conn_info = json.loads(conn_info_str)
+                    _LOGGING.debug("Thumbnail connection info for %s: %s", content_id, conn_info)
+
+                    # Download thumbnail via socket in separate thread
+                    Thread(
+                        target=self._download_thumbnail_via_socket,
+                        args=(content_id, conn_info),
+                        daemon=True,
+                        name=f"ThumbnailDownload-{content_id}"
+                    ).start()
                 except Exception as exc:
-                    _LOGGING.error("Error decoding thumbnail data: %s", exc)
+                    _LOGGING.error("Error processing thumbnail connection info: %s", exc)
             return
         elif event == "go_to_standby":
             artmode_status = ArtModeStatus.Unavailable
@@ -1412,6 +1417,11 @@ class SamsungTVWS:
             msg_data = {
                 "request": "get_thumbnail",
                 "content_id": artwork_id,
+                "conn_info": {
+                    "d2d_mode": "socket",
+                    "connection_id": random.randrange(4 * 1024 * 1024 * 1024),
+                    "id": gen_uuid(),
+                },
                 "id": gen_uuid(),
             }
             self._ws_send(
@@ -1434,6 +1444,80 @@ class SamsungTVWS:
         except Exception as exc:
             _LOGGING.error("Error getting thumbnail for %s: %s", artwork_id, exc)
             return None
+
+    def _download_thumbnail_via_socket(self, content_id: str, conn_info: dict) -> None:
+        """Download thumbnail data via TCP socket connection."""
+        art_socket = None
+        try:
+            # Extract connection details
+            ip = conn_info.get("ip")
+            port = conn_info.get("port")
+
+            if not ip or not port:
+                _LOGGING.error("Missing IP or port in connection info: %s", conn_info)
+                return
+
+            _LOGGING.debug("Connecting to %s:%s to download thumbnail for %s", ip, port, content_id)
+
+            # Create socket and connect
+            art_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            art_socket.settimeout(10)  # 10 second timeout
+            art_socket.connect((ip, int(port)))
+
+            # Receive header length (4 bytes, big-endian)
+            header_len_bytes = art_socket.recv(4)
+            if len(header_len_bytes) != 4:
+                _LOGGING.error("Failed to receive header length")
+                return
+
+            header_len = int.from_bytes(header_len_bytes, byteorder='big')
+            _LOGGING.debug("Header length: %d bytes", header_len)
+
+            # Receive and parse header
+            header_data = bytearray()
+            while len(header_data) < header_len:
+                chunk = art_socket.recv(header_len - len(header_data))
+                if not chunk:
+                    _LOGGING.error("Connection closed while receiving header")
+                    return
+                header_data.extend(chunk)
+
+            header = json.loads(header_data.decode('utf-8'))
+            _LOGGING.debug("Thumbnail header: %s", header)
+
+            # Download thumbnail data
+            thumbnail_len = int(header.get("fileLength", 0))
+            if thumbnail_len <= 0:
+                _LOGGING.error("Invalid thumbnail length: %d", thumbnail_len)
+                return
+
+            _LOGGING.debug("Downloading %d bytes of thumbnail data", thumbnail_len)
+            thumbnail_data = bytearray()
+            while len(thumbnail_data) < thumbnail_len:
+                chunk = art_socket.recv(min(8192, thumbnail_len - len(thumbnail_data)))
+                if not chunk:
+                    _LOGGING.error("Connection closed while receiving thumbnail data")
+                    return
+                thumbnail_data.extend(chunk)
+
+            # Store thumbnail in cache
+            self._artwork_thumbnails[content_id] = bytes(thumbnail_data)
+            _LOGGING.info("Successfully downloaded thumbnail for %s (%d bytes)", content_id, len(thumbnail_data))
+
+            # Notify that thumbnail is available
+            if self._status_callback:
+                self._status_callback()
+
+        except socket.timeout:
+            _LOGGING.error("Timeout downloading thumbnail for %s", content_id)
+        except Exception as exc:
+            _LOGGING.error("Error downloading thumbnail for %s: %s", content_id, exc)
+        finally:
+            if art_socket:
+                try:
+                    art_socket.close()
+                except Exception:
+                    pass
 
     def upload_artwork(self, data: bytes, file_type: str = "PNG", matte: str | None = None) -> bool:
         """Upload a custom artwork image."""
