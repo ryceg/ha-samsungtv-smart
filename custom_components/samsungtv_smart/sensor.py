@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 import logging
 from typing import Any
 
@@ -15,7 +16,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 
-from .const import DATA_CFG, DOMAIN
+from .const import DATA_CFG, DATA_WS, DOMAIN
 from .entity import SamsungTVEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ async def async_setup_entry(
     def _add_art_mode_sensors(utc_now: datetime) -> None:
         """Create art mode sensors after media player is ready."""
         config = hass.data[DOMAIN][config_entry.entry_id][DATA_CFG]
+        ws_instance = hass.data[DOMAIN][config_entry.entry_id].get(DATA_WS)
 
         # Find the media player entity for this TV using entity registry
         entity_reg = er.async_get(hass)
@@ -61,13 +63,15 @@ async def async_setup_entry(
             )
             return
 
-        # Create art mode sensors
+        # Create Phase 1 art mode sensors
         entities = [
-            ArtModeStatusSensor(config, config_entry.entry_id, media_player_entity_id),
+            ArtModeStatusSensor(config, config_entry.entry_id, media_player_entity_id, ws_instance),
+            CurrentArtworkSensor(config, config_entry.entry_id, media_player_entity_id, ws_instance),
+            SlideshowStatusSensor(config, config_entry.entry_id, media_player_entity_id, ws_instance),
         ]
         async_add_entities(entities, True)
         _LOGGER.debug(
-            "Successfully set up art mode sensors for %s",
+            "Successfully set up Phase 1 art mode sensors for %s",
             config.get(CONF_HOST, "unknown")
         )
 
@@ -75,25 +79,22 @@ async def async_setup_entry(
     async_call_later(hass, 10, _add_art_mode_sensors)
 
 
-class ArtModeStatusSensor(SamsungTVEntity, SensorEntity):
-    """Sensor for art mode on/off status."""
+class ArtModeSensorBase(SamsungTVEntity, SensorEntity):
+    """Base class for art mode sensors."""
 
-    _attr_device_class = SensorDeviceClass.ENUM
-    _attr_options = ["on", "off", "unavailable"]
     _attr_has_entity_name = True
-    _attr_name = "Art mode status"
-    _attr_icon = "mdi:television-ambient-light"
 
     def __init__(
         self,
         config: dict[str, Any],
         entry_id: str,
         media_player_entity_id: str,
+        ws_instance: Any = None,
     ) -> None:
-        """Initialize the sensor."""
+        """Initialize the base art mode sensor."""
         super().__init__(config, entry_id)
         self._media_player_entity_id = media_player_entity_id
-        self._attr_unique_id = f"{self.unique_id}_art_mode_status"
+        self._ws = ws_instance
 
     async def async_added_to_hass(self) -> None:
         """Set up state change tracking when entity is added to hass."""
@@ -123,33 +124,67 @@ class ArtModeStatusSensor(SamsungTVEntity, SensorEntity):
             and media_player_state.attributes.get("art_mode_supported", False)
         )
 
+    def _get_media_player_state(self):
+        """Get the current media player state."""
+        return self.hass.states.get(self._media_player_entity_id)
+
+    def _get_ws_data(self, data_key: str, default=None):
+        """Get data from the websocket instance."""
+        if not self._ws:
+            return default
+        return getattr(self._ws, data_key, default)
+
+
+class ArtModeStatusSensor(ArtModeSensorBase):
+    """Sensor for art mode on/off status."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["on", "off", "unavailable"]
+    _attr_name = "Art mode status"
+    _attr_icon = "mdi:television-ambient-light"
+
+    def __init__(
+        self,
+        config: dict[str, Any],
+        entry_id: str,
+        media_player_entity_id: str,
+        ws_instance: Any = None,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(config, entry_id, media_player_entity_id, ws_instance)
+        self._attr_unique_id = f"{self.unique_id}_art_mode_status"
+
     @property
     def native_value(self) -> str | None:
         """Return the state of the sensor."""
-        media_player_state = self.hass.states.get(self._media_player_entity_id)
+        # Try to get status directly from websocket first
+        if self._ws:
+            artmode_status = self._get_ws_data("artmode_status")
+            if artmode_status is not None:
+                # Convert enum to string
+                if hasattr(artmode_status, 'name'):
+                    status_name = artmode_status.name.lower()
+                    if status_name == "on":
+                        return "on"
+                    elif status_name == "off":
+                        return "off"
+                    elif status_name in ["unavailable", "unsupported"]:
+                        return "unavailable"
+
+        # Fallback to media player attributes
+        media_player_state = self._get_media_player_state()
         if not media_player_state:
-            return None
-
-        art_mode_status = media_player_state.attributes.get("art_mode_status")
-
-        # Map media player attribute values to sensor options
-        if art_mode_status == "on":
-            return "on"
-        elif art_mode_status == "off":
-            return "off"
-        elif art_mode_status == "unavailable":
             return "unavailable"
 
-        # Default to unavailable if status is unclear
+        art_mode_status = media_player_state.attributes.get("art_mode_status")
+        if art_mode_status in ["on", "off", "unavailable"]:
+            return art_mode_status
+
         return "unavailable"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return additional state attributes."""
-        media_player_state = self.hass.states.get(self._media_player_entity_id)
-        if not media_player_state:
-            return None
-
         value = self.native_value
         attrs = {
             "is_art_mode": value == "on",
@@ -157,10 +192,175 @@ class ArtModeStatusSensor(SamsungTVEntity, SensorEntity):
             "media_player_entity_id": self._media_player_entity_id,
         }
 
-        # Add current artwork info if available from media player
-        current_artwork = media_player_state.attributes.get("current_artwork")
+        # Add current artwork info if available from websocket
+        if self._ws:
+            current_artwork = self._get_ws_data("_current_artwork")
+            if current_artwork and isinstance(current_artwork, dict):
+                attrs["current_artwork"] = current_artwork
+
+        return attrs
+
+
+class CurrentArtworkSensor(ArtModeSensorBase):
+    """Sensor for currently displayed artwork information."""
+
+    _attr_name = "Current artwork"
+    _attr_icon = "mdi:image-frame"
+
+    def __init__(
+        self,
+        config: dict[str, Any],
+        entry_id: str,
+        media_player_entity_id: str,
+        ws_instance: Any = None,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(config, entry_id, media_player_entity_id, ws_instance)
+        self._attr_unique_id = f"{self.unique_id}_current_artwork"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the name/title of the current artwork."""
+        current_artwork = self._get_current_artwork_data()
+        if not current_artwork:
+            return None
+
+        # Try different fields for artwork name
+        for field in ["title", "name", "content_name", "artwork_name"]:
+            if field in current_artwork and current_artwork[field]:
+                return current_artwork[field]
+
+        # Fallback to content_id if no name available
+        return current_artwork.get("content_id", "Unknown")
+
+    def _get_current_artwork_data(self) -> dict[str, Any] | None:
+        """Get current artwork data from websocket."""
+        if not self._ws:
+            return None
+
+        current_artwork = self._get_ws_data("_current_artwork")
         if current_artwork and isinstance(current_artwork, dict):
-            # Expose artwork data fields for automations/scripts
-            attrs["current_artwork"] = current_artwork
+            return current_artwork
+
+        return None
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available and art mode is on."""
+        if not super().available:
+            return False
+
+        # Only available when art mode is actually on
+        if self._ws:
+            artmode_status = self._get_ws_data("artmode_status")
+            if artmode_status and hasattr(artmode_status, 'name'):
+                return artmode_status.name.lower() == "on"
+
+        return False
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return additional artwork attributes."""
+        current_artwork = self._get_current_artwork_data()
+        if not current_artwork:
+            return {"media_player_entity_id": self._media_player_entity_id}
+
+        attrs = {
+            "media_player_entity_id": self._media_player_entity_id,
+            "content_id": current_artwork.get("content_id"),
+            "category": current_artwork.get("category"),
+            "category_id": current_artwork.get("category_id"),
+            "thumbnail_url": current_artwork.get("thumbnail_url"),
+            "full_data": current_artwork,
+        }
+
+        # Add any additional fields that might be available
+        for field in ["artist", "description", "created_date", "file_type", "dimensions"]:
+            if field in current_artwork:
+                attrs[field] = current_artwork[field]
+
+        return attrs
+
+
+class SlideshowStatusSensor(ArtModeSensorBase):
+    """Sensor for slideshow status and settings."""
+
+    _attr_name = "Slideshow status"
+    _attr_icon = "mdi:slideshow"
+
+    def __init__(
+        self,
+        config: dict[str, Any],
+        entry_id: str,
+        media_player_entity_id: str,
+        ws_instance: Any = None,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(config, entry_id, media_player_entity_id, ws_instance)
+        self._attr_unique_id = f"{self.unique_id}_slideshow_status"
+        self._slideshow_data = None
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the slideshow status."""
+        slideshow_data = self._get_slideshow_data()
+        if not slideshow_data:
+            return "unknown"
+
+        # Try different fields for slideshow status
+        for status_field in ["status", "state", "enabled", "running"]:
+            if status_field in slideshow_data:
+                status = slideshow_data[status_field]
+                if isinstance(status, bool):
+                    return "on" if status else "off"
+                elif isinstance(status, str):
+                    return status.lower()
+
+        return "unknown"
+
+    def _get_slideshow_data(self) -> dict[str, Any] | None:
+        """Get slideshow data from websocket."""
+        if not self._ws:
+            return self._slideshow_data
+
+        # Get current slideshow status from websocket
+        slideshow_status = self._get_ws_data("_slideshow_status")
+        if slideshow_status and isinstance(slideshow_status, dict):
+            self._slideshow_data = slideshow_status
+            return slideshow_status
+
+        # Request slideshow status if not available
+        if self._ws and hasattr(self._ws, 'request_slideshow_status'):
+            self._ws.request_slideshow_status()
+
+        return self._slideshow_data
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available and art mode is supported."""
+        if not super().available:
+            return False
+
+        # Available when art mode is supported (not necessarily on)
+        if self._ws:
+            artmode_status = self._get_ws_data("artmode_status")
+            if artmode_status and hasattr(artmode_status, 'name'):
+                return artmode_status.name.lower() != "unsupported"
+
+        return True
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return additional slideshow attributes."""
+        attrs = {"media_player_entity_id": self._media_player_entity_id}
+        
+        slideshow_data = self._get_slideshow_data()
+        if slideshow_data:
+            attrs.update({
+                "interval": slideshow_data.get("interval"),
+                "category": slideshow_data.get("category"),
+                "random_order": slideshow_data.get("random_order"),
+                "full_data": slideshow_data,
+            })
 
         return attrs

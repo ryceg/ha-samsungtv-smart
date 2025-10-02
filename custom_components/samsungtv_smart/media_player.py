@@ -1105,13 +1105,6 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
         if art_mode_supported:
             if self._ws.artmode_status == ArtModeStatus.On:
                 data.update({ATTR_ART_MODE_STATUS: STATE_ON})
-                # Request current artwork info if in art mode
-                current_artwork = self._ws.get_current_artwork()
-                if not current_artwork:
-                    self._ws.request_current_artwork()
-                else:
-                    # Expose current artwork data
-                    data.update({"current_artwork": current_artwork})
             elif self._ws.artmode_status == ArtModeStatus.Off:
                 data.update({ATTR_ART_MODE_STATUS: STATE_OFF})
             elif self._ws.artmode_status == ArtModeStatus.Unavailable:
@@ -1119,6 +1112,16 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
             elif self._ws.artmode_status == ArtModeStatus.Unsupported:
                 # Art mode is supported but WebSocket hasn't connected yet
                 data.update({ATTR_ART_MODE_STATUS: "unavailable"})
+
+            # Request current artwork info if art mode is supported (regardless of on/off)
+            # The TV tracks current artwork even when in regular TV mode (matches reference library)
+            current_artwork = self._ws.get_current_artwork()
+            if not current_artwork:
+                # Request artwork info if we don't have it yet
+                self._ws.request_current_artwork()
+            else:
+                # Expose current artwork data if available
+                data.update({"current_artwork": current_artwork})
         if self._st:
             picture_mode = self._st.picture_mode
             picture_mode_list = self._st.picture_mode_list

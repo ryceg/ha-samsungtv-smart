@@ -299,6 +299,7 @@ class SamsungTVWS:
         self._client_art_enabled = True  # Enable art mode thread by default
         self._current_artwork = None  # Store current artwork info
         self._artwork_thumbnails: dict[str, bytes] = {}  # Cache for artwork thumbnails
+        self._slideshow_status = None  # Store slideshow status info
 
         self._ping = Ping(self.host)
         self._status_callback = None
@@ -823,6 +824,15 @@ class SamsungTVWS:
             # Store current artwork information
             self._current_artwork = data
             _LOGGING.debug("Current artwork updated: %s", data)
+            # Notify media player that artwork data has changed
+            self._notify_callback()
+            return
+        elif event == "slideshow_status" or event == "get_slideshow_status":
+            # Store slideshow status information
+            self._slideshow_status = data
+            _LOGGING.debug("Slideshow status updated: %s", data)
+            # Notify media player that slideshow data has changed
+            self._notify_callback()
             return
         elif event == "thumbnail" or event == "get_thumbnail":
             # Store thumbnail image data
@@ -1246,9 +1256,13 @@ class SamsungTVWS:
 
     def request_current_artwork(self) -> bool:
         """Request current artwork information via art websocket."""
-        if not self._ws_art or self._artmode_status != ArtModeStatus.On:
-            _LOGGING.debug("Cannot request artwork: ws_art=%s, status=%s",
-                          bool(self._ws_art), self._artmode_status)
+        if not self._ws_art:
+            _LOGGING.debug("Cannot request artwork: art websocket not connected")
+            return False
+
+        # Can request artwork even when art mode is OFF (matches reference library behavior)
+        if self._artmode_status == ArtModeStatus.Unsupported:
+            _LOGGING.debug("Cannot request artwork: art mode not supported")
             return False
 
         try:
@@ -1273,6 +1287,42 @@ class SamsungTVWS:
             return True
         except Exception as exc:
             _LOGGING.error("Error requesting current artwork: %s", exc)
+            return False
+
+    def get_slideshow_status(self) -> dict | None:
+        """Get slideshow status information."""
+        return self._slideshow_status
+
+    def request_slideshow_status(self) -> bool:
+        """Request slideshow status information via art websocket."""
+        if not (self._ws_art and self._artmode_status != ArtModeStatus.Unsupported):
+            _LOGGING.debug("Cannot request slideshow status: ws_art=%s, status=%s",
+                          self._ws_art, self._artmode_status)
+            return False
+
+        try:
+            msg_data = {
+                "request": "get_slideshow_status",
+                "id": gen_uuid(),
+            }
+            result = self._ws_send(
+                {
+                    "method": "ms.channel.emit",
+                    "params": {
+                        "data": json.dumps(msg_data),
+                        "to": "host",
+                        "event": "art_app_request",
+                    },
+                },
+                key_press_delay=0,
+                use_control=True,
+                ws_socket=self._ws_art,
+            )
+            _LOGGING.debug("Requested slideshow status info")
+            return result
+
+        except Exception as exc:
+            _LOGGING.error("Error requesting slideshow status: %s", exc)
             return False
 
     def get_available_artworks(self, category: str | None = None) -> list[dict]:
