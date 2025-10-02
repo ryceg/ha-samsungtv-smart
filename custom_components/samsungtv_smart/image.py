@@ -15,7 +15,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 
-from .const import DATA_CFG, DOMAIN
+from .const import DATA_CFG, DATA_WS, DOMAIN
 from .entity import SamsungTVEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -32,6 +32,8 @@ async def async_setup_entry(
     def _add_art_mode_image(utc_now: datetime) -> None:
         """Create art mode image entity after media player is ready."""
         config = hass.data[DOMAIN][config_entry.entry_id][DATA_CFG]
+        ws_instance = hass.data[DOMAIN][config_entry.entry_id].get(DATA_WS)
+        _LOGGER.debug("Image setup: ws_instance = %s", "present" if ws_instance else "None")
 
         # Find the media player entity for this TV using entity registry
         entity_reg = er.async_get(hass)
@@ -61,8 +63,8 @@ async def async_setup_entry(
             )
             return
 
-        # Create art mode image entity
-        entity = ArtModeImageEntity(hass, config, config_entry.entry_id, media_player_entity_id)
+        # Create art mode image entity with WebSocket instance
+        entity = ArtModeImageEntity(hass, config, config_entry.entry_id, media_player_entity_id, ws_instance)
         async_add_entities([entity])
         _LOGGER.debug(
             "Successfully set up art mode image for %s",
@@ -87,15 +89,19 @@ class ArtModeImageEntity(SamsungTVEntity, ImageEntity):
         config: dict[str, Any],
         entry_id: str,
         media_player_entity_id: str,
+        ws_instance: Any = None,
     ) -> None:
         """Initialize the image entity."""
+        # Set entry_id first before calling parent inits
+        self._entry_id = entry_id
+        self._media_player_entity_id = media_player_entity_id
+        self._ws = ws_instance
+
         # Initialize SamsungTVEntity
         SamsungTVEntity.__init__(self, config, entry_id)
         # Initialize ImageEntity with required hass parameter
         ImageEntity.__init__(self, hass)
 
-        self._entry_id = entry_id
-        self._media_player_entity_id = media_player_entity_id
         self._attr_unique_id = f"{self.unique_id}_art_image"
         self._last_artwork_id = None
         self._cached_image: bytes | None = None
@@ -178,19 +184,16 @@ class ArtModeImageEntity(SamsungTVEntity, ImageEntity):
         if self._cached_image:
             return self._cached_image
 
-        # Get WebSocket API instance from config entry
+        # Get WebSocket API instance
+        if not self._ws:
+            _LOGGER.debug("WebSocket instance not available")
+            return None
+
         try:
-            entry_data = self.hass.data[DOMAIN][self._entry_id]
-            ws_api = entry_data.get("ws")
-
-            if not ws_api:
-                _LOGGER.error("WebSocket API not available")
-                return None
-
             # Request thumbnail using executor for sync websocket operation
             # This checks cache first, then requests if needed
             thumbnail = await self.hass.async_add_executor_job(
-                ws_api.get_artwork_thumbnail, artwork_id
+                self._ws.get_artwork_thumbnail, artwork_id
             )
 
             if thumbnail:

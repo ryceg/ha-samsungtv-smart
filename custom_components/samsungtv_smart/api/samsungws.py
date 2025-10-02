@@ -825,17 +825,20 @@ class SamsungTVWS:
             self._current_artwork = data
             _LOGGING.debug("Current artwork updated: %s", data)
             # Notify media player that artwork data has changed
-            self._notify_callback()
+            if self._status_callback:
+                self._status_callback()
             return
         elif event == "slideshow_status" or event == "get_slideshow_status":
             # Store slideshow status information
             self._slideshow_status = data
             _LOGGING.debug("Slideshow status updated: %s", data)
             # Notify media player that slideshow data has changed
-            self._notify_callback()
+            if self._status_callback:
+                self._status_callback()
             return
         elif event == "thumbnail" or event == "get_thumbnail":
             # Store thumbnail image data
+            _LOGGING.debug("Received thumbnail event: %s", event)
             content_id = data.get("content_id")
             image_data = data.get("image_data")
             if content_id and image_data:
@@ -845,6 +848,9 @@ class SamsungTVWS:
                     self._artwork_thumbnails[content_id] = thumbnail_bytes
                     _LOGGING.debug("Stored thumbnail for artwork: %s (%d bytes)",
                                   content_id, len(thumbnail_bytes))
+                    # Notify that thumbnail is available
+                    if self._status_callback:
+                        self._status_callback()
                 except Exception as exc:
                     _LOGGING.error("Error decoding thumbnail data: %s", exc)
             return

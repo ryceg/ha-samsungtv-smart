@@ -348,6 +348,13 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
 
         self._ws.register_new_token_callback(new_token_callback)
 
+        # Store WebSocket instance in hass.data for access by other platforms
+        if entry_data:
+            entry_data[DATA_WS] = self._ws
+            _LOGGER.debug("Stored WebSocket instance in hass.data for entry %s", entry_id)
+        else:
+            _LOGGER.warning("entry_data is None, cannot store WebSocket instance")
+
         # rest api initialization
         self._rest_api = SamsungTVAsyncRest(
             host=self._host,
