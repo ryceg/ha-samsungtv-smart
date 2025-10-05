@@ -150,11 +150,11 @@ class ArtModeImageEntity(SamsungTVEntity, ImageEntity):
         if not media_player_state:
             return False
 
-        # Available if art mode is supported and currently on
+        # Available if art mode is supported (regardless of current on/off status)
+        # We can request artwork info even when art mode is off
         art_mode_supported = media_player_state.attributes.get("art_mode_supported", False)
-        art_mode_status = media_player_state.attributes.get("art_mode_status")
 
-        return art_mode_supported and art_mode_status == "on"
+        return art_mode_supported
 
     async def async_image(self) -> bytes | None:
         """Return bytes of the current artwork image."""

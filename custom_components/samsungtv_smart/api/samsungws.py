@@ -33,7 +33,7 @@ import socket
 import ssl
 import subprocess
 import sys
-from threading import Lock, Thread
+from threading import Event, Lock, Thread
 import time
 from typing import Any
 from urllib.parse import urlencode, urljoin
@@ -213,7 +213,6 @@ class SamsungTVAsyncRest:
 
     async def async_rest_device_info(self) -> dict[str, Any]:
         """Get device info using rest api call."""
-        _LOGGING.debug("Get device info via rest api")
         return await self._rest_request("")
 
     async def async_rest_app_status(self, app_id: str) -> dict[str, Any]:
@@ -301,6 +300,7 @@ class SamsungTVWS:
         self._current_artwork = None  # Store current artwork info
         self._artwork_thumbnails: dict[str, bytes] = {}  # Cache for artwork thumbnails
         self._slideshow_status = None  # Store slideshow status info
+        self._pending_thumbnail_requests: dict[str, dict] = {}  # Pending thumbnail requests
 
         self._ping = Ping(self.host)
         self._status_callback = None
@@ -837,7 +837,7 @@ class SamsungTVWS:
             if self._status_callback:
                 self._status_callback()
             return
-        elif event == "thumbnail" or event == "get_thumbnail":
+        elif event == "thumbnail" or event == "get_thumbnail" or event == "get_thumbnail_list":
             # Received connection info for thumbnail download
             _LOGGING.debug("Received thumbnail connection info: %s", data)
             content_id = data.get("content_id")
@@ -849,13 +849,19 @@ class SamsungTVWS:
                     conn_info = json.loads(conn_info_str)
                     _LOGGING.debug("Thumbnail connection info for %s: %s", content_id, conn_info)
 
-                    # Download thumbnail via socket in separate thread
-                    Thread(
-                        target=self._download_thumbnail_via_socket,
-                        args=(content_id, conn_info),
-                        daemon=True,
-                        name=f"ThumbnailDownload-{content_id}"
-                    ).start()
+                    # Check if this is a response to a pending synchronous request
+                    if content_id in self._pending_thumbnail_requests:
+                        request_data = self._pending_thumbnail_requests[content_id]
+                        request_data['conn_info'] = conn_info
+                        request_data['event'].set()  # Signal that response is ready
+                    else:
+                        # Asynchronous request - download in background thread
+                        Thread(
+                            target=self._download_thumbnail_via_socket,
+                            args=(content_id, conn_info),
+                            daemon=True,
+                            name=f"ThumbnailDownload-{content_id}"
+                        ).start()
                 except Exception as exc:
                     _LOGGING.error("Error processing thumbnail connection info: %s", exc)
             return
@@ -863,6 +869,76 @@ class SamsungTVWS:
             artmode_status = ArtModeStatus.Unavailable
         elif event == "wakeup":
             self._get_artmode_status()
+            return
+        elif event == "error":
+            # Handle error response for thumbnail request
+            error_code = data.get("error_code")
+            request_data_str = data.get("request_data")
+            if request_data_str:
+                try:
+                    request_data = json.loads(request_data_str)
+
+                    # Check for single thumbnail request (get_thumbnail)
+                    content_id = request_data.get("content_id")
+                    if content_id and content_id in self._pending_thumbnail_requests:
+                        _LOGGING.error(
+                            "Received error for thumbnail %s: error_code=%s",
+                            content_id,
+                            error_code,
+                        )
+                        # Signal the waiting thread with error
+                        pending_request = self._pending_thumbnail_requests[content_id]
+                        pending_request["conn_info"] = None
+                        pending_request["error_code"] = error_code
+                        pending_request["event"].set()
+                        return
+
+                    # Check for thumbnail list request (get_thumbnail_list)
+                    content_list = request_data.get("content_id_list")
+                    if content_list:
+                        for content in content_list:
+                            content_id = content.get("content_id")
+                            if content_id in self._pending_thumbnail_requests:
+                                _LOGGING.error(
+                                    "Received error for thumbnail %s: error_code=%s",
+                                    content_id,
+                                    error_code,
+                                )
+                                # Signal the waiting thread with error
+                                pending_request = self._pending_thumbnail_requests[
+                                    content_id
+                                ]
+                                pending_request["conn_info"] = None
+                                pending_request["error_code"] = error_code
+                                pending_request["event"].set()
+                                # Assuming we can stop after finding the first match
+                                return
+                except json.JSONDecodeError:
+                    _LOGGING.debug(
+                        "Could not parse request_data in error event: %s",
+                        request_data_str,
+                    )
+            _LOGGING.debug("Unknown art mode error event: %s", data)
+            return
+        elif event == "image_selected":
+            content_id = data.get("content_id")
+            if content_id and content_id in self._pending_thumbnail_requests:
+                _LOGGING.debug(
+                    "Received image_selected event for pending thumbnail request %s. Aborting.",
+                    content_id,
+                )
+                # Signal the waiting thread, but with no conn_info
+                pending_request = self._pending_thumbnail_requests[content_id]
+                pending_request["conn_info"] = None
+                pending_request["event"].set()
+                return
+
+            # Store current artwork information
+            self._current_artwork = data
+            _LOGGING.debug("Current artwork updated: %s", data)
+            # Notify media player that artwork data has changed
+            if self._status_callback:
+                self._status_callback()
             return
         else:
             # Unknown message
@@ -1226,7 +1302,6 @@ class SamsungTVWS:
 
     def rest_device_info(self):
         """Get device info using rest api call."""
-        _LOGGING.debug("Get device info via rest api")
         return self._rest_request("")
 
     def rest_app_status(self, app_id):
@@ -1402,8 +1477,19 @@ class SamsungTVWS:
             _LOGGING.error("Error selecting artwork %s: %s", artwork_id, exc)
             return False
 
-    def get_artwork_thumbnail(self, artwork_id: str) -> bytes | None:
-        """Get thumbnail image for a specific artwork."""
+    def get_artwork_thumbnail(self, artwork_id: str, timeout: int = 10) -> bytes | None:
+        """Get thumbnail image for a specific artwork.
+
+        This method waits synchronously for the TV to respond with connection info,
+        then downloads the thumbnail via a separate socket connection.
+
+        Args:
+            artwork_id: The artwork content ID
+            timeout: Maximum time to wait for response in seconds (default: 10)
+
+        Returns:
+            Thumbnail image data as bytes, or None if failed
+        """
         # Check cache first
         if artwork_id in self._artwork_thumbnails:
             _LOGGING.debug("Returning cached thumbnail for artwork: %s", artwork_id)
@@ -1414,97 +1500,183 @@ class SamsungTVWS:
             return None
 
         try:
-            msg_data = {
-                "request": "get_thumbnail",
-                "content_id": artwork_id,
-                "conn_info": {
-                    "d2d_mode": "socket",
-                    "connection_id": random.randrange(4 * 1024 * 1024 * 1024),
-                    "id": gen_uuid(),
-                },
-                "id": gen_uuid(),
+            # Create event to wait for response
+            response_event = Event()
+            request_data = {
+                'event': response_event,
+                'conn_info': None,
+                'error_code': None
             }
-            self._ws_send(
-                {
-                    "method": "ms.channel.emit",
-                    "params": {
-                        "data": json.dumps(msg_data),
-                        "to": "host",
-                        "event": "art_app_request",
+            self._pending_thumbnail_requests[artwork_id] = request_data
+
+            try:
+                # Send thumbnail request using get_thumbnail_list API
+                # (get_thumbnail doesn't work on some TV models, but get_thumbnail_list does)
+                # Generate single UUID for both id and request_id (matches library implementation)
+                request_uuid = gen_uuid()
+                msg_data = {
+                    "request": "get_thumbnail_list",
+                    "content_id_list": [{"content_id": artwork_id}],  # List of objects
+                    "conn_info": {
+                        "d2d_mode": "socket",
+                        "connection_id": random.randrange(4 * 1024 * 1024 * 1024),
+                        "id": request_uuid,
                     },
-                },
-                key_press_delay=0,
-                use_control=True,
-                ws_socket=self._ws_art,
-            )
-            _LOGGING.debug("Requested thumbnail for artwork: %s", artwork_id)
-            # Thumbnail data will come via websocket response and be stored in cache
-            # Return None for now - caller should retry after a brief delay
-            return None
+                    "id": request_uuid,
+                    "request_id": request_uuid,
+                }
+                _LOGGING.debug("Sending thumbnail request with data: %s", msg_data)
+                self._ws_send(
+                    {
+                        "method": "ms.channel.emit",
+                        "params": {
+                            "data": json.dumps(msg_data),
+                            "to": "host",
+                            "event": "art_app_request",
+                        },
+                    },
+                    key_press_delay=0,
+                    use_control=True,
+                    ws_socket=self._ws_art,
+                )
+                _LOGGING.debug("Requested thumbnail for artwork: %s, waiting for response...", artwork_id)
+
+                # Wait for response with timeout
+                if response_event.wait(timeout=timeout):
+                    # Check if we received an error
+                    error_code = request_data.get('error_code')
+                    if error_code:
+                        _LOGGING.error(
+                            "TV returned error %s for thumbnail request for %s. "
+                            "This may indicate art mode needs to be ON, or the feature is not supported.",
+                            error_code,
+                            artwork_id
+                        )
+                        return None
+
+                    conn_info = request_data['conn_info']
+                    if conn_info:
+                        # Download thumbnail synchronously
+                        self._download_thumbnail_via_socket(artwork_id, conn_info)
+                        # Return from cache after download
+                        return self._artwork_thumbnails.get(artwork_id)
+                    else:
+                        _LOGGING.error("No connection info received for thumbnail %s", artwork_id)
+                        return None
+                else:
+                    _LOGGING.error("Timeout waiting for thumbnail response for %s", artwork_id)
+                    return None
+            finally:
+                # Clean up pending request
+                self._pending_thumbnail_requests.pop(artwork_id, None)
+
         except Exception as exc:
             _LOGGING.error("Error getting thumbnail for %s: %s", artwork_id, exc)
             return None
 
     def _download_thumbnail_via_socket(self, content_id: str, conn_info: dict) -> None:
-        """Download thumbnail data via TCP socket connection."""
+        """Download thumbnail data via TCP socket connection.
+
+        Supports both secured (SSL/TLS) and unsecured connections.
+        Can handle multiple thumbnails from get_thumbnail_list responses.
+        """
+        import ssl
+
         art_socket = None
         try:
             # Extract connection details
             ip = conn_info.get("ip")
             port = conn_info.get("port")
+            secured = conn_info.get("secured", False)
 
             if not ip or not port:
                 _LOGGING.error("Missing IP or port in connection info: %s", conn_info)
                 return
 
-            _LOGGING.debug("Connecting to %s:%s to download thumbnail for %s", ip, port, content_id)
+            _LOGGING.debug("Connecting to %s:%s (secured=%s) to download thumbnail for %s",
+                          ip, port, secured, content_id)
 
             # Create socket and connect
-            art_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            art_socket.settimeout(10)  # 10 second timeout
+            art_socket_raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            art_socket_raw.settimeout(10)  # 10 second timeout
+
+            # Wrap with SSL if secured
+            if secured:
+                context = ssl.create_default_context()
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
+                art_socket = context.wrap_socket(art_socket_raw)
+            else:
+                art_socket = art_socket_raw
+
             art_socket.connect((ip, int(port)))
 
-            # Receive header length (4 bytes, big-endian)
-            header_len_bytes = art_socket.recv(4)
-            if len(header_len_bytes) != 4:
-                _LOGGING.error("Failed to receive header length")
-                return
+            # For thumbnail_list responses, we may receive multiple thumbnails
+            # Loop until we've received all of them
+            total_num_thumbnails = 1
+            current_thumb = -1
+            thumbnail_count = 0
 
-            header_len = int.from_bytes(header_len_bytes, byteorder='big')
-            _LOGGING.debug("Header length: %d bytes", header_len)
+            while current_thumb + 1 < total_num_thumbnails:
+                # Receive header length (4 bytes, big-endian)
+                header_len_bytes = art_socket.recv(4)
+                if len(header_len_bytes) == 0:
+                    _LOGGING.debug("Connection closed after %d thumbnails", thumbnail_count)
+                    break
 
-            # Receive and parse header
-            header_data = bytearray()
-            while len(header_data) < header_len:
-                chunk = art_socket.recv(header_len - len(header_data))
-                if not chunk:
-                    _LOGGING.error("Connection closed while receiving header")
+                if len(header_len_bytes) != 4:
+                    _LOGGING.error("Failed to receive complete header length")
                     return
-                header_data.extend(chunk)
 
-            header = json.loads(header_data.decode('utf-8'))
-            _LOGGING.debug("Thumbnail header: %s", header)
+                header_len = int.from_bytes(header_len_bytes, byteorder='big')
+                _LOGGING.debug("Header length: %d bytes", header_len)
 
-            # Download thumbnail data
-            thumbnail_len = int(header.get("fileLength", 0))
-            if thumbnail_len <= 0:
-                _LOGGING.error("Invalid thumbnail length: %d", thumbnail_len)
-                return
+                # Empty header means we're done
+                if header_len == 0:
+                    _LOGGING.debug("Empty header (header_len=0), done receiving thumbnails")
+                    break
 
-            _LOGGING.debug("Downloading %d bytes of thumbnail data", thumbnail_len)
-            thumbnail_data = bytearray()
-            while len(thumbnail_data) < thumbnail_len:
-                chunk = art_socket.recv(min(8192, thumbnail_len - len(thumbnail_data)))
-                if not chunk:
-                    _LOGGING.error("Connection closed while receiving thumbnail data")
+                # Receive and parse header
+                header_data = bytearray()
+                while len(header_data) < header_len:
+                    chunk = art_socket.recv(header_len - len(header_data))
+                    if not chunk:
+                        _LOGGING.error("Connection closed while receiving header")
+                        return
+                    header_data.extend(chunk)
+
+                header = json.loads(header_data.decode('utf-8'))
+                _LOGGING.debug("Thumbnail header: %s", header)
+
+                # Extract metadata
+                thumbnail_len = int(header.get("fileLength", 0))
+                current_thumb = int(header.get("num", 0))
+                total_num_thumbnails = int(header.get("total", 1))
+                file_id = header.get("fileID", content_id)
+
+                if thumbnail_len <= 0:
+                    _LOGGING.error("Invalid thumbnail length: %d", thumbnail_len)
                     return
-                thumbnail_data.extend(chunk)
 
-            # Store thumbnail in cache
-            self._artwork_thumbnails[content_id] = bytes(thumbnail_data)
-            _LOGGING.info("Successfully downloaded thumbnail for %s (%d bytes)", content_id, len(thumbnail_data))
+                _LOGGING.debug("Downloading thumbnail %d/%d (%d bytes)",
+                              current_thumb + 1, total_num_thumbnails, thumbnail_len)
 
-            # Notify that thumbnail is available
+                # Download thumbnail data
+                thumbnail_data = bytearray()
+                while len(thumbnail_data) < thumbnail_len:
+                    chunk = art_socket.recv(min(8192, thumbnail_len - len(thumbnail_data)))
+                    if not chunk:
+                        _LOGGING.error("Connection closed while receiving thumbnail data")
+                        return
+                    thumbnail_data.extend(chunk)
+
+                # Store thumbnail in cache using file_id from header
+                self._artwork_thumbnails[file_id] = bytes(thumbnail_data)
+                _LOGGING.info("Successfully downloaded thumbnail for %s (%d bytes)",
+                             file_id, len(thumbnail_data))
+                thumbnail_count += 1
+
+            # Notify that thumbnail(s) are available
             if self._status_callback:
                 self._status_callback()
 

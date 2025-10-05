@@ -563,7 +563,6 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
         """Check TV status with WS and others method to check power status."""
 
         if self._get_device_spec("PowerState") is not None:
-            _LOGGER.debug("Checking if TV %s is on using device info", self._host)
             # Ensure we get an updated value
             info = await self._async_load_device_info(force=True)
             return info is not None and info["device"]["PowerState"] == "on"
