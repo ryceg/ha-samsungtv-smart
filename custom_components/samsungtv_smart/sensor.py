@@ -8,9 +8,10 @@ import logging
 from typing import Any
 
 from homeassistant.components.media_player.const import DOMAIN as MP_DOMAIN
+from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST
+from homeassistant.const import CONF_HOST, PERCENTAGE
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -68,6 +69,8 @@ async def async_setup_entry(
             ArtModeStatusSensor(config, config_entry.entry_id, media_player_entity_id, ws_instance),
             CurrentArtworkSensor(config, config_entry.entry_id, media_player_entity_id, ws_instance),
             SlideshowStatusSensor(config, config_entry.entry_id, media_player_entity_id, ws_instance),
+            ArtBrightnessSensor(config, config_entry.entry_id, media_player_entity_id, ws_instance),
+            ArtColorTemperatureSensor(config, config_entry.entry_id, media_player_entity_id, ws_instance),
         ]
         async_add_entities(entities, True)
         _LOGGER.debug(
@@ -353,7 +356,7 @@ class SlideshowStatusSensor(ArtModeSensorBase):
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return additional slideshow attributes."""
         attrs = {"media_player_entity_id": self._media_player_entity_id}
-        
+
         slideshow_data = self._get_slideshow_data()
         if slideshow_data:
             attrs.update({
@@ -364,3 +367,84 @@ class SlideshowStatusSensor(ArtModeSensorBase):
             })
 
         return attrs
+
+
+class ArtBrightnessSensor(ArtModeSensorBase):
+    """Sensor for Art Mode brightness (0-100)."""
+
+    _attr_name = "Art mode brightness"
+    _attr_icon = "mdi:brightness-6"
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_suggested_display_precision = 0
+
+    def __init__(
+        self,
+        config: dict[str, Any],
+        entry_id: str,
+        media_player_entity_id: str,
+        ws_instance: Any = None,
+    ) -> None:
+        """Initialize the brightness sensor."""
+        super().__init__(config, entry_id, media_player_entity_id, ws_instance)
+        self._attr_unique_id = f"{entry_id}_art_brightness"
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the current brightness value."""
+        if self._ws:
+            brightness = self._ws.get_brightness()
+            return brightness
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return additional attributes."""
+        min_val, max_val = 0, 100
+        if self._ws:
+            min_val, max_val = self._ws.get_brightness_range()
+        return {
+            "media_player_entity_id": self._media_player_entity_id,
+            "min": min_val,
+            "max": max_val,
+            "hint": "Use service samsungtv_smart.set_art_brightness to change",
+        }
+
+
+class ArtColorTemperatureSensor(ArtModeSensorBase):
+    """Sensor for Art Mode color temperature."""
+
+    _attr_name = "Art mode color temperature"
+    _attr_icon = "mdi:thermometer"
+    _attr_suggested_display_precision = 0
+
+    def __init__(
+        self,
+        config: dict[str, Any],
+        entry_id: str,
+        media_player_entity_id: str,
+        ws_instance: Any = None,
+    ) -> None:
+        """Initialize the color temperature sensor."""
+        super().__init__(config, entry_id, media_player_entity_id, ws_instance)
+        self._attr_unique_id = f"{entry_id}_art_color_temperature"
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the current color temperature value."""
+        if self._ws:
+            temp = self._ws.get_color_temperature()
+            return temp
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return additional attributes."""
+        min_val, max_val = -50, 50
+        if self._ws:
+            min_val, max_val = self._ws.get_color_temperature_range()
+        return {
+            "media_player_entity_id": self._media_player_entity_id,
+            "min": min_val,
+            "max": max_val,
+            "hint": "Use service samsungtv_smart.set_art_color_temperature to change",
+        }

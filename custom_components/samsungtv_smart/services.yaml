@@ -123,3 +123,130 @@ set_photo_filter:
       example: "ink"
       selector:
         text:
+
+set_art_brightness:
+  name: Set Art Mode Brightness
+  description: Adjust brightness for Art Mode display.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: media_player
+  fields:
+    brightness:
+      name: Brightness
+      description: Brightness level (0-10 on most TVs)
+      required: true
+      example: 5
+      selector:
+        number:
+          min: 0
+          max: 10
+          mode: slider
+
+set_art_color_temperature:
+  name: Set Art Mode Color Temperature
+  description: Adjust color temperature for Art Mode display.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: media_player
+  fields:
+    temperature:
+      name: Color Temperature
+      description: Color temperature value (-5 to 5 on most TVs)
+      required: true
+      example: 0
+      selector:
+        number:
+          min: -5
+          max: 5
+          mode: slider
+
+change_artwork_matte:
+  name: Change Artwork Matte/Frame
+  description: Change the matte or frame style for an artwork.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: media_player
+  fields:
+    artwork_id:
+      name: Artwork ID
+      description: ID of artwork to change matte for
+      required: true
+      example: "MY-F0020"
+      selector:
+        text:
+    matte_id:
+      name: Matte Style
+      description: Matte/frame style (e.g., 'shadowbox_polar', 'modern_apricot', 'none')
+      required: false
+      example: "shadowbox_polar"
+      selector:
+        text:
+    portrait_matte_id:
+      name: Portrait Matte Style
+      description: Matte for portrait orientation (optional)
+      required: false
+      example: "shadowbox_polar"
+      selector:
+        text:
+
+set_artwork_favorite:
+  name: Set Artwork Favorite
+  description: Mark an artwork as favorite or remove from favorites.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: media_player
+  fields:
+    artwork_id:
+      name: Artwork ID
+      description: ID of artwork
+      required: true
+      example: "MY-F0020"
+      selector:
+        text:
+    favorite:
+      name: Favorite Status
+      description: Mark as favorite
+      default: true
+      selector:
+        boolean:
+
+set_art_slideshow:
+  name: Set Art Slideshow
+  description: Configure auto-rotation slideshow for Art Mode.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: media_player
+  fields:
+    duration:
+      name: Duration
+      description: Rotation interval in minutes (0 to disable)
+      default: 60
+      selector:
+        number:
+          min: 0
+          max: 1440
+          unit_of_measurement: "minutes"
+    shuffle:
+      name: Shuffle
+      description: Shuffle artwork order
+      default: true
+      selector:
+        boolean:
+    category:
+      name: Category
+      description: Artwork category (2=My Pictures, 4=Favorites, 8=Store Art)
+      default: 2
+      selector:
+        select:
+          options:
+            - label: "My Pictures"
+              value: "2"
+            - label: "Favorites"
+              value: "4"
+            - label: "Store Art"
+              value: "8"

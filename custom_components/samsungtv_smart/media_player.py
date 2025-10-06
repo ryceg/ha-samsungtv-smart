@@ -96,6 +96,11 @@ from .const import (
     MAX_WOL_REPEAT,
     SERVICE_SELECT_PICTURE_MODE,
     SERVICE_SET_ART_MODE,
+    SERVICE_SET_ART_BRIGHTNESS,
+    SERVICE_SET_ART_COLOR_TEMPERATURE,
+    SERVICE_CHANGE_ARTWORK_MATTE,
+    SERVICE_SET_ARTWORK_FAVORITE,
+    SERVICE_SET_ART_SLIDESHOW,
     SIGNAL_CONFIG_ENTITY,
     STD_APP_LIST,
     WS_PREFIX,
@@ -233,6 +238,42 @@ async def async_setup_entry(
             vol.Required("filter"): cv.string,
         },
         "async_set_photo_filter",
+    )
+    platform.async_register_entity_service(
+        SERVICE_SET_ART_BRIGHTNESS,
+        {vol.Required("brightness"): vol.All(vol.Coerce(int), vol.Range(min=0, max=10))},
+        "async_set_art_brightness",
+    )
+    platform.async_register_entity_service(
+        SERVICE_SET_ART_COLOR_TEMPERATURE,
+        {vol.Required("temperature"): vol.All(vol.Coerce(int), vol.Range(min=-5, max=5))},
+        "async_set_art_color_temperature",
+    )
+    platform.async_register_entity_service(
+        SERVICE_CHANGE_ARTWORK_MATTE,
+        {
+            vol.Required("artwork_id"): cv.string,
+            vol.Optional("matte_id"): cv.string,
+            vol.Optional("portrait_matte_id"): cv.string,
+        },
+        "async_change_artwork_matte",
+    )
+    platform.async_register_entity_service(
+        SERVICE_SET_ARTWORK_FAVORITE,
+        {
+            vol.Required("artwork_id"): cv.string,
+            vol.Optional("favorite", default=True): cv.boolean,
+        },
+        "async_set_artwork_favorite",
+    )
+    platform.async_register_entity_service(
+        SERVICE_SET_ART_SLIDESHOW,
+        {
+            vol.Optional("duration", default=60): vol.All(vol.Coerce(int), vol.Range(min=0, max=1440)),
+            vol.Optional("shuffle", default=True): cv.boolean,
+            vol.Optional("category", default="2"): vol.All(cv.string, vol.In(["2", "4", "8"])),
+        },
+        "async_set_art_slideshow",
     )
 
 
@@ -1386,6 +1427,72 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
             self._ws.set_photo_filter, artwork_id, filter
         )
         _LOGGER.info("Applied filter '%s' to artwork %s on %s", filter, artwork_id, self.name)
+
+    async def async_set_art_brightness(self, brightness: int) -> None:
+        """Set Art Mode brightness."""
+        if not self._ws.art_mode_supported():
+            _LOGGER.error("Art mode not supported on this TV")
+            return
+
+        await self.hass.async_add_executor_job(
+            self._ws.set_brightness, brightness
+        )
+        _LOGGER.info("Set Art Mode brightness to %d on %s", brightness, self.name)
+
+    async def async_set_art_color_temperature(self, temperature: int) -> None:
+        """Set Art Mode color temperature."""
+        if not self._ws.art_mode_supported():
+            _LOGGER.error("Art mode not supported on this TV")
+            return
+
+        await self.hass.async_add_executor_job(
+            self._ws.set_color_temperature, temperature
+        )
+        _LOGGER.info("Set Art Mode color temperature to %d on %s", temperature, self.name)
+
+    async def async_change_artwork_matte(
+        self, artwork_id: str, matte_id: str | None = None, portrait_matte_id: str | None = None
+    ) -> None:
+        """Change the matte/frame for an artwork."""
+        if not self._ws.art_mode_supported():
+            _LOGGER.error("Art mode not supported on this TV")
+            return
+
+        await self.hass.async_add_executor_job(
+            self._ws.change_matte, artwork_id, matte_id, portrait_matte_id
+        )
+        _LOGGER.info("Changed matte for artwork %s on %s", artwork_id, self.name)
+
+    async def async_set_artwork_favorite(self, artwork_id: str, favorite: bool = True) -> None:
+        """Mark an artwork as favorite."""
+        if not self._ws.art_mode_supported():
+            _LOGGER.error("Art mode not supported on this TV")
+            return
+
+        status = "on" if favorite else "off"
+        await self.hass.async_add_executor_job(
+            self._ws.set_favorite, artwork_id, status
+        )
+        _LOGGER.info("Set favorite status for %s to %s on %s", artwork_id, status, self.name)
+
+    async def async_set_art_slideshow(
+        self, duration: int = 60, shuffle: bool = True, category: str = "2"
+    ) -> None:
+        """Configure Art Mode slideshow."""
+        if not self._ws.art_mode_supported():
+            _LOGGER.error("Art mode not supported on this TV")
+            return
+
+        # Convert string category to int
+        category_int = int(category)
+
+        await self.hass.async_add_executor_job(
+            self._ws.set_auto_rotation_status, duration, shuffle, category_int
+        )
+        _LOGGER.info(
+            "Set slideshow on %s: duration=%d min, shuffle=%s, category=%d",
+            self.name, duration, shuffle, category_int
+        )
 
     def _turn_off(self):
         """Turn off media player."""

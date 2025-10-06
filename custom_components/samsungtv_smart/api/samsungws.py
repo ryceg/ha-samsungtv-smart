@@ -301,6 +301,8 @@ class SamsungTVWS:
         self._artwork_thumbnails: dict[str, bytes] = {}  # Cache for artwork thumbnails
         self._slideshow_status = None  # Store slideshow status info
         self._pending_thumbnail_requests: dict[str, dict] = {}  # Pending thumbnail requests
+        self._pending_upload_requests: dict[str, dict] = {}  # Pending upload requests
+        self._artmode_settings_cache: dict[str, dict] = {}  # Cache for artmode settings (brightness, color_temp ranges)
 
         self._ping = Ping(self.host)
         self._status_callback = None
@@ -939,6 +941,81 @@ class SamsungTVWS:
             # Notify media player that artwork data has changed
             if self._status_callback:
                 self._status_callback()
+            return
+        elif event == "ready_to_use":
+            # TV is ready to receive artwork upload via socket
+            request_id = data.get("request_id")
+            conn_info_str = data.get("conn_info")
+
+            if request_id and conn_info_str:
+                try:
+                    conn_info = json.loads(conn_info_str)
+                    _LOGGING.debug("Received upload ready for request %s: %s", request_id, conn_info)
+
+                    # Check if this is a response to a pending upload request
+                    if request_id in self._pending_upload_requests:
+                        # Upload in background thread
+                        Thread(
+                            target=self._upload_artwork_via_socket,
+                            args=(request_id, conn_info),
+                            daemon=True,
+                            name=f"ArtworkUpload-{request_id}"
+                        ).start()
+                    else:
+                        _LOGGING.warning("Received upload ready for unknown request: %s", request_id)
+                except Exception as exc:
+                    _LOGGING.error("Error processing upload ready event: %s", exc)
+            return
+        elif event == "image_added":
+            # Artwork upload completed successfully
+            content_id = data.get("content_id")
+            request_id = data.get("request_id")
+
+            _LOGGING.info("Artwork upload completed: content_id=%s, request_id=%s", content_id, request_id)
+
+            # Signal the waiting upload request
+            if request_id and request_id in self._pending_upload_requests:
+                pending_request = self._pending_upload_requests[request_id]
+                pending_request['content_id'] = content_id
+                pending_request['event'].set()
+            return
+        elif event in ["get_artmode_settings", "artmode_settings"]:
+            # Response to get_artmode_settings request
+            _LOGGING.debug("Received artmode settings response: %s", data)
+            # Parse and cache settings data
+            data_str = data.get("data")
+            if data_str:
+                try:
+                    settings_list = json.loads(data_str)
+                    for setting in settings_list:
+                        item_name = setting.get("item")
+                        if item_name:
+                            self._artmode_settings_cache[item_name] = setting
+                    _LOGGING.debug("Cached artmode settings: %s", self._artmode_settings_cache)
+                except (json.JSONDecodeError, TypeError) as e:
+                    _LOGGING.error("Failed to parse artmode settings: %s", e)
+            return
+        elif event in ["get_brightness", "brightness"]:
+            # Response to get_brightness request
+            brightness_value = data.get("value")
+            _LOGGING.debug("Received brightness response: %s", brightness_value)
+            # Could cache or emit event here
+            return
+        elif event in ["get_color_temperature", "color_temperature"]:
+            # Response to get_color_temperature request
+            temp_value = data.get("value")
+            _LOGGING.debug("Received color temperature response: %s", temp_value)
+            # Could cache or emit event here
+            return
+        elif event in ["get_auto_rotation_status", "auto_rotation_status"]:
+            # Response to get_auto_rotation_status request
+            _LOGGING.debug("Received auto rotation status response: %s", data)
+            # Could cache or emit event here
+            return
+        elif event in ["get_matte_list", "matte_list"]:
+            # Response to get_matte_list request
+            _LOGGING.debug("Received matte list response: %s", data)
+            # Could cache matte list here if needed
             return
         else:
             # Unknown message
@@ -1691,44 +1768,216 @@ class SamsungTVWS:
                 except Exception:
                     pass
 
-    def upload_artwork(self, data: bytes, file_type: str = "PNG", matte: str | None = None) -> bool:
-        """Upload a custom artwork image."""
+    def _upload_artwork_via_socket(self, request_uuid: str, conn_info: dict) -> str | None:
+        """Upload artwork data via TCP socket connection.
+
+        Args:
+            request_uuid: UUID of the upload request
+            conn_info: Connection info from TV's ready_to_use response
+
+        Returns:
+            Content ID of uploaded artwork, or None if failed
+        """
+        import ssl
+
+        art_socket = None
+        try:
+            request_data = self._pending_upload_requests.get(request_uuid)
+            if not request_data:
+                _LOGGING.error("No pending upload request found for %s", request_uuid)
+                return None
+
+            image_data = request_data['image_data']
+            file_type = request_data['file_type']
+
+            # Extract connection details
+            ip = conn_info.get("ip")
+            port = conn_info.get("port")
+            sec_key = conn_info.get("key")
+            secured = conn_info.get("secured", False)
+
+            if not ip or not port:
+                _LOGGING.error("Missing IP or port in upload connection info: %s", conn_info)
+                return None
+
+            _LOGGING.debug("Connecting to %s:%s (secured=%s) to upload artwork",
+                          ip, port, secured)
+
+            # Create socket and connect
+            art_socket_raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            art_socket_raw.settimeout(30)  # 30 second timeout for upload
+
+            # Wrap with SSL if secured
+            if secured:
+                context = ssl.create_default_context()
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
+                art_socket = context.wrap_socket(art_socket_raw)
+            else:
+                art_socket = art_socket_raw
+
+            art_socket.connect((ip, int(port)))
+
+            # Prepare header
+            header = json.dumps({
+                "num": 0,
+                "total": 1,
+                "fileLength": len(image_data),
+                "fileName": "artwork",
+                "fileType": file_type,
+                "secKey": sec_key,
+                "version": "0.0.1",
+            })
+
+            _LOGGING.debug("Sending upload header: %s", header)
+
+            # Send header length (4 bytes, big-endian)
+            art_socket.send(len(header).to_bytes(4, "big"))
+
+            # Send header
+            art_socket.send(header.encode("ascii"))
+
+            # Send image data
+            _LOGGING.debug("Sending %d bytes of image data...", len(image_data))
+            art_socket.send(image_data)
+
+            art_socket.close()
+            _LOGGING.info("Uploaded artwork data via socket (%d bytes)", len(image_data))
+
+            # Note: We don't return content_id here - it will come from image_added event
+            return None
+
+        except socket.timeout:
+            _LOGGING.error("Timeout uploading artwork via socket")
+            return None
+        except Exception as exc:
+            _LOGGING.error("Error uploading artwork via socket: %s", exc)
+            return None
+        finally:
+            if art_socket:
+                try:
+                    art_socket.close()
+                except Exception:
+                    pass
+
+    def upload_artwork(
+        self,
+        data: bytes,
+        file_type: str = "PNG",
+        matte: str | None = None,
+        portrait_matte: str | None = None,
+        image_date: str | None = None,
+        timeout: int = 30
+    ) -> str | None:
+        """Upload a custom artwork image via socket connection.
+
+        Args:
+            data: Image data as bytes
+            file_type: Image format (PNG, JPG, JPEG)
+            matte: Matte/frame style (e.g., 'shadowbox_polar', 'none')
+            portrait_matte: Portrait orientation matte (default: same as matte)
+            image_date: EXIF date string (default: current time)
+            timeout: Maximum time to wait for upload completion
+
+        Returns:
+            Content ID of uploaded artwork, or None if failed
+        """
         if not self._ws_art:
             _LOGGING.debug("Cannot upload artwork: art websocket not connected")
-            return False
+            return None
+
+        # Normalize file type
+        file_type = file_type.lower()
+        if file_type == "jpeg":
+            file_type = "jpg"
+
+        file_size = len(data)
+
+        # Default date to current time
+        if image_date is None:
+            from datetime import datetime
+            image_date = datetime.now().strftime("%Y:%m:%d %H:%M:%S")
+
+        # Default portrait matte to same as matte
+        if portrait_matte is None:
+            portrait_matte = matte or "shadowbox_polar"
+        if matte is None:
+            matte = "shadowbox_polar"
 
         try:
-            msg_data = {
-                "request": "send_image",
-                "file_type": file_type,
-                "conn_info": {
-                    "d2d_mode": "socket",
-                    "connection_id": gen_uuid(),
-                },
-                "image_data": base64.b64encode(data).decode("utf-8"),
-                "id": gen_uuid(),
+            # Create event to wait for upload completion
+            upload_event = Event()
+            request_uuid = gen_uuid()
+            request_data = {
+                'event': upload_event,
+                'conn_info': None,
+                'content_id': None,
+                'error': None,
+                'image_data': data,
+                'file_type': file_type,
             }
-            if matte:
-                msg_data["matte"] = matte
+            self._pending_upload_requests[request_uuid] = request_data
 
-            self._ws_send(
-                {
-                    "method": "ms.channel.emit",
-                    "params": {
-                        "data": json.dumps(msg_data),
-                        "to": "host",
-                        "event": "art_app_request",
+            try:
+                # Send upload request
+                msg_data = {
+                    "request": "send_image",
+                    "file_type": file_type,
+                    "request_id": request_uuid,
+                    "id": request_uuid,
+                    "conn_info": {
+                        "d2d_mode": "socket",
+                        "connection_id": random.randrange(4 * 1024 * 1024 * 1024),
+                        "id": request_uuid,
                     },
-                },
-                key_press_delay=0,
-                use_control=True,
-                ws_socket=self._ws_art,
-            )
-            _LOGGING.info("Uploaded artwork: type=%s, size=%d bytes", file_type, len(data))
-            return True
+                    "image_date": image_date,
+                    "matte_id": matte,
+                    "portrait_matte_id": portrait_matte,
+                    "file_size": file_size,
+                }
+
+                _LOGGING.debug("Sending upload request: %s", msg_data)
+                self._ws_send(
+                    {
+                        "method": "ms.channel.emit",
+                        "params": {
+                            "data": json.dumps(msg_data),
+                            "to": "host",
+                            "event": "art_app_request",
+                        },
+                    },
+                    key_press_delay=0,
+                    use_control=True,
+                    ws_socket=self._ws_art,
+                )
+
+                _LOGGING.debug("Waiting for upload ready response (timeout %ds)...", timeout)
+
+                # Wait for TV to respond with connection info
+                if upload_event.wait(timeout=timeout):
+                    if request_data.get('error'):
+                        _LOGGING.error("Upload failed: %s", request_data['error'])
+                        return None
+
+                    content_id = request_data.get('content_id')
+                    if content_id:
+                        _LOGGING.info("Successfully uploaded artwork: %s (type=%s, size=%d bytes)",
+                                     content_id, file_type, file_size)
+                        return content_id
+                    else:
+                        _LOGGING.error("Upload completed but no content_id received")
+                        return None
+                else:
+                    _LOGGING.error("Timeout waiting for upload response")
+                    return None
+
+            finally:
+                # Clean up pending request
+                self._pending_upload_requests.pop(request_uuid, None)
+
         except Exception as exc:
             _LOGGING.error("Error uploading artwork: %s", exc)
-            return False
+            return None
 
     def delete_artwork(self, artwork_id: str) -> bool:
         """Delete an uploaded artwork."""
@@ -1854,6 +2103,368 @@ class SamsungTVWS:
             _LOGGING.error("Error setting filter on %s: %s", artwork_id, exc)
             return False
 
+
+    def get_brightness(self) -> int | None:
+        """Get current Art Mode brightness (0-100)."""
+        if not self._ws_art:
+            _LOGGING.debug("Cannot get brightness: art websocket not connected")
+            return None
+
+        try:
+            msg_data = {
+                "request": "get_brightness",
+                "id": gen_uuid(),
+            }
+            # Note: This is a simple request without waiting for response
+            # The response would need to be handled in _handle_artmode_status
+            # For now, we'll try get_artmode_settings first
+            settings = self.get_artmode_settings("brightness")
+            if settings and isinstance(settings, dict):
+                return settings.get("value")
+            return None
+        except Exception as exc:
+            _LOGGING.error("Error getting brightness: %s", exc)
+            return None
+
+    def set_brightness(self, value: int) -> bool:
+        """Set Art Mode brightness (0-100)."""
+        if not self._ws_art:
+            _LOGGING.debug("Cannot set brightness: art websocket not connected")
+            return False
+
+        try:
+            msg_data = {
+                "request": "set_brightness",
+                "value": value,
+                "id": gen_uuid(),
+            }
+            self._ws_send(
+                {
+                    "method": "ms.channel.emit",
+                    "params": {
+                        "data": json.dumps(msg_data),
+                        "to": "host",
+                        "event": "art_app_request",
+                    },
+                },
+                key_press_delay=0,
+                use_control=True,
+                ws_socket=self._ws_art,
+            )
+            _LOGGING.info("Set Art Mode brightness to %d", value)
+            return True
+        except Exception as exc:
+            _LOGGING.error("Error setting brightness: %s", exc)
+            return False
+
+    def get_color_temperature(self) -> int | None:
+        """Get current Art Mode color temperature."""
+        if not self._ws_art:
+            _LOGGING.debug("Cannot get color temperature: art websocket not connected")
+            return None
+
+        try:
+            settings = self.get_artmode_settings("color_temperature")
+            if settings and isinstance(settings, dict):
+                return settings.get("value")
+            return None
+        except Exception as exc:
+            _LOGGING.error("Error getting color temperature: %s", exc)
+            return None
+
+    def set_color_temperature(self, value: int) -> bool:
+        """Set Art Mode color temperature."""
+        if not self._ws_art:
+            _LOGGING.debug("Cannot set color temperature: art websocket not connected")
+            return False
+
+        try:
+            msg_data = {
+                "request": "set_color_temperature",
+                "value": value,
+                "id": gen_uuid(),
+            }
+            self._ws_send(
+                {
+                    "method": "ms.channel.emit",
+                    "params": {
+                        "data": json.dumps(msg_data),
+                        "to": "host",
+                        "event": "art_app_request",
+                    },
+                },
+                key_press_delay=0,
+                use_control=True,
+                ws_socket=self._ws_art,
+            )
+            _LOGGING.info("Set Art Mode color temperature to %d", value)
+            return True
+        except Exception as exc:
+            _LOGGING.error("Error setting color temperature: %s", exc)
+            return False
+
+    def get_artmode_settings(self, setting: str = "") -> dict | list | None:
+        """Get Art Mode settings from cache or request new data.
+
+        Args:
+            setting: Specific setting to get ('brightness', 'color_temperature',
+                    'motion_sensitivity', 'motion_timer', 'brightness_sensor_setting')
+                    If empty, returns all settings.
+
+        Returns:
+            Dict with setting info, list of all settings, or None if failed
+        """
+        # If we have cached data, return it
+        if setting and setting in self._artmode_settings_cache:
+            return self._artmode_settings_cache[setting]
+        elif not setting and self._artmode_settings_cache:
+            return list(self._artmode_settings_cache.values())
+
+        # Otherwise request new data
+        if not self._ws_art:
+            _LOGGING.debug("Cannot get artmode settings: art websocket not connected")
+            return None
+
+        try:
+            msg_data = {
+                "request": "get_artmode_settings",
+                "id": gen_uuid(),
+            }
+            self._ws_send(
+                {
+                    "method": "ms.channel.emit",
+                    "params": {
+                        "data": json.dumps(msg_data),
+                        "to": "host",
+                        "event": "art_app_request",
+                    },
+                },
+                key_press_delay=0,
+                use_control=True,
+                ws_socket=self._ws_art,
+            )
+            _LOGGING.debug("Requested artmode settings")
+            # Return cached data if available after small delay
+            time.sleep(0.5)
+            if setting and setting in self._artmode_settings_cache:
+                return self._artmode_settings_cache[setting]
+            elif not setting and self._artmode_settings_cache:
+                return list(self._artmode_settings_cache.values())
+            return None
+        except Exception as exc:
+            _LOGGING.error("Error getting artmode settings: %s", exc)
+            return None
+
+    def get_brightness_range(self) -> tuple[int, int]:
+        """Get brightness min/max range from cached settings."""
+        settings = self._artmode_settings_cache.get("brightness", {})
+        min_val = int(settings.get("min", 0))
+        max_val = int(settings.get("max", 100))
+        return (min_val, max_val)
+
+    def get_color_temperature_range(self) -> tuple[int, int]:
+        """Get color temperature min/max range from cached settings."""
+        settings = self._artmode_settings_cache.get("color_temperature", {})
+        min_val = int(settings.get("min", -50))
+        max_val = int(settings.get("max", 50))
+        return (min_val, max_val)
+
+    def get_matte_list(self, include_color: bool = False) -> list | tuple | None:
+        """Get list of available matte/frame styles.
+
+        Args:
+            include_color: If True, returns (matte_list, color_list) tuple
+
+        Returns:
+            List of matte styles, or tuple of (matte_list, color_list) if include_color=True
+        """
+        if not self._ws_art:
+            _LOGGING.debug("Cannot get matte list: art websocket not connected")
+            return None
+
+        try:
+            msg_data = {
+                "request": "get_matte_list",
+                "id": gen_uuid(),
+            }
+            self._ws_send(
+                {
+                    "method": "ms.channel.emit",
+                    "params": {
+                        "data": json.dumps(msg_data),
+                        "to": "host",
+                        "event": "art_app_request",
+                    },
+                },
+                key_press_delay=0,
+                use_control=True,
+                ws_socket=self._ws_art,
+            )
+            _LOGGING.debug("Requested matte list")
+            # Response would be handled in event handler
+            return None
+        except Exception as exc:
+            _LOGGING.error("Error getting matte list: %s", exc)
+            return None
+
+    def change_matte(
+        self,
+        content_id: str,
+        matte_id: str | None = None,
+        portrait_matte: str | None = None
+    ) -> bool:
+        """Change the matte/frame for an artwork.
+
+        Args:
+            content_id: Artwork ID
+            matte_id: Matte style (e.g., 'shadowbox_polar', 'modern_apricot', 'none')
+            portrait_matte: Portrait orientation matte (default: same as matte_id)
+        """
+        if not self._ws_art:
+            _LOGGING.debug("Cannot change matte: art websocket not connected")
+            return False
+
+        try:
+            msg_data = {
+                "request": "change_matte",
+                "content_id": content_id,
+                "id": gen_uuid(),
+            }
+            if matte_id is not None:
+                msg_data["matte_id"] = matte_id
+            if portrait_matte is not None:
+                msg_data["portrait_matte_id"] = portrait_matte
+
+            self._ws_send(
+                {
+                    "method": "ms.channel.emit",
+                    "params": {
+                        "data": json.dumps(msg_data),
+                        "to": "host",
+                        "event": "art_app_request",
+                    },
+                },
+                key_press_delay=0,
+                use_control=True,
+                ws_socket=self._ws_art,
+            )
+            _LOGGING.info("Changed matte for artwork %s", content_id)
+            return True
+        except Exception as exc:
+            _LOGGING.error("Error changing matte for %s: %s", content_id, exc)
+            return False
+
+    def set_favorite(self, content_id: str, status: str = "on") -> bool:
+        """Mark artwork as favorite.
+
+        Args:
+            content_id: Artwork ID
+            status: "on" to favorite, "off" to unfavorite
+        """
+        if not self._ws_art:
+            _LOGGING.debug("Cannot set favorite: art websocket not connected")
+            return False
+
+        try:
+            msg_data = {
+                "request": "change_favorite",
+                "content_id": content_id,
+                "status": status,
+                "id": gen_uuid(),
+            }
+            self._ws_send(
+                {
+                    "method": "ms.channel.emit",
+                    "params": {
+                        "data": json.dumps(msg_data),
+                        "to": "host",
+                        "event": "art_app_request",
+                    },
+                },
+                key_press_delay=0,
+                use_control=True,
+                ws_socket=self._ws_art,
+            )
+            _LOGGING.info("Set favorite status for %s to %s", content_id, status)
+            return True
+        except Exception as exc:
+            _LOGGING.error("Error setting favorite for %s: %s", content_id, exc)
+            return False
+
+    def get_auto_rotation_status(self) -> dict | None:
+        """Get auto-rotation (slideshow) status."""
+        if not self._ws_art:
+            _LOGGING.debug("Cannot get auto-rotation status: art websocket not connected")
+            return None
+
+        try:
+            msg_data = {
+                "request": "get_auto_rotation_status",
+                "id": gen_uuid(),
+            }
+            self._ws_send(
+                {
+                    "method": "ms.channel.emit",
+                    "params": {
+                        "data": json.dumps(msg_data),
+                        "to": "host",
+                        "event": "art_app_request",
+                    },
+                },
+                key_press_delay=0,
+                use_control=True,
+                ws_socket=self._ws_art,
+            )
+            _LOGGING.debug("Requested auto-rotation status")
+            return None
+        except Exception as exc:
+            _LOGGING.error("Error getting auto-rotation status: %s", exc)
+            return None
+
+    def set_auto_rotation_status(
+        self,
+        duration: int = 0,
+        shuffle: bool = True,
+        category: int = 2
+    ) -> bool:
+        """Set auto-rotation (slideshow) settings.
+
+        Args:
+            duration: Duration in minutes (0 = off)
+            shuffle: True for shuffle slideshow, False for sequential
+            category: 2 = my pictures, 4 = favorites, 8 = store art
+        """
+        if not self._ws_art:
+            _LOGGING.debug("Cannot set auto-rotation: art websocket not connected")
+            return False
+
+        try:
+            msg_data = {
+                "request": "set_auto_rotation_status",
+                "duration": duration,
+                "type": "shuffleslideshow" if shuffle else "slideshow",
+                "category": category,
+                "id": gen_uuid(),
+            }
+            self._ws_send(
+                {
+                    "method": "ms.channel.emit",
+                    "params": {
+                        "data": json.dumps(msg_data),
+                        "to": "host",
+                        "event": "art_app_request",
+                    },
+                },
+                key_press_delay=0,
+                use_control=True,
+                ws_socket=self._ws_art,
+            )
+            _LOGGING.info("Set auto-rotation: duration=%d, shuffle=%s, category=%d",
+                         duration, shuffle, category)
+            return True
+        except Exception as exc:
+            _LOGGING.error("Error setting auto-rotation: %s", exc)
+            return False
 
     def shortcuts(self):
         """Return a list of available shortcuts."""

@@ -95,6 +95,15 @@ RESULT_WRONG_APIKEY = "wrong_api_key"
 
 SERVICE_SELECT_PICTURE_MODE = "select_picture_mode"
 SERVICE_SET_ART_MODE = "set_art_mode"
+SERVICE_SELECT_ARTWORK = "select_artwork"
+SERVICE_UPLOAD_ARTWORK = "upload_artwork"
+SERVICE_DELETE_ARTWORK = "delete_artwork"
+SERVICE_SET_PHOTO_FILTER = "set_photo_filter"
+SERVICE_SET_ART_BRIGHTNESS = "set_art_brightness"
+SERVICE_SET_ART_COLOR_TEMPERATURE = "set_art_color_temperature"
+SERVICE_CHANGE_ARTWORK_MATTE = "change_artwork_matte"
+SERVICE_SET_ARTWORK_FAVORITE = "set_artwork_favorite"
+SERVICE_SET_ART_SLIDESHOW = "set_art_slideshow"
 
 SIGNAL_CONFIG_ENTITY = f"{DOMAIN}_config"
 
