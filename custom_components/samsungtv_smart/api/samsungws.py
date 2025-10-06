@@ -2244,8 +2244,7 @@ class SamsungTVWS:
                 ws_socket=self._ws_art,
             )
             _LOGGING.debug("Requested artmode settings")
-            # Return cached data if available after small delay
-            time.sleep(0.5)
+            # Return cached data if available (response will populate cache via event handler)
             if setting and setting in self._artmode_settings_cache:
                 return self._artmode_settings_cache[setting]
             elif not setting and self._artmode_settings_cache:
