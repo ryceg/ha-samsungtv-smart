@@ -303,6 +303,9 @@ class SamsungTVWS:
         self._pending_thumbnail_requests: dict[str, dict] = {}  # Pending thumbnail requests
         self._pending_upload_requests: dict[str, dict] = {}  # Pending upload requests
         self._artmode_settings_cache: dict[str, dict] = {}  # Cache for artmode settings (brightness, color_temp ranges)
+        self._photo_filter_list_cache: list[dict] = []  # Cache for available photo filters
+        self._matte_list_cache: list[dict] = []  # Cache for available matte styles
+        self._art_cache_update_callback = None  # Callback when art mode cache is updated
 
         self._ping = Ping(self.host)
         self._status_callback = None
@@ -363,6 +366,10 @@ class SamsungTVWS:
     def register_status_callback(self, func):
         """Register callback function used on status change."""
         self._status_callback = func
+
+    def register_art_cache_callback(self, func):
+        """Register callback function used when art mode cache is updated."""
+        self._art_cache_update_callback = func
 
     def unregister_status_callback(self):
         """Unregister callback function used on status change."""
@@ -1015,7 +1022,36 @@ class SamsungTVWS:
         elif event in ["get_matte_list", "matte_list"]:
             # Response to get_matte_list request
             _LOGGING.debug("Received matte list response: %s", data)
-            # Could cache matte list here if needed
+            # Parse and cache matte list (uses matte_type_list field)
+            matte_list_str = data.get("matte_type_list") or data.get("matte_list")
+            if matte_list_str:
+                try:
+                    matte_list = json.loads(matte_list_str)
+                    if isinstance(matte_list, list):
+                        self._matte_list_cache = matte_list
+                        _LOGGING.debug("Cached matte list: %s", self._matte_list_cache)
+                        # Notify listeners that cache was updated
+                        if self._art_cache_update_callback:
+                            self._art_cache_update_callback()
+                except (json.JSONDecodeError, TypeError) as e:
+                    _LOGGING.error("Failed to parse matte list: %s", e)
+            return
+        elif event in ["get_photo_filter_list", "photo_filter_list"]:
+            # Response to get_photo_filter_list request
+            _LOGGING.debug("Received photo filter list response: %s", data)
+            # Parse and cache filter list
+            filter_list_str = data.get("filter_list")
+            if filter_list_str:
+                try:
+                    filter_list = json.loads(filter_list_str)
+                    if isinstance(filter_list, list):
+                        self._photo_filter_list_cache = filter_list
+                        _LOGGING.debug("Cached photo filter list: %s", self._photo_filter_list_cache)
+                        # Notify listeners that cache was updated
+                        if self._art_cache_update_callback:
+                            self._art_cache_update_callback()
+                except (json.JSONDecodeError, TypeError) as e:
+                    _LOGGING.error("Failed to parse photo filter list: %s", e)
             return
         else:
             # Unknown message
@@ -2042,7 +2078,16 @@ class SamsungTVWS:
             return False
 
     def get_photo_filter_list(self) -> list[str]:
-        """Get list of available photo filters."""
+        """Get list of available photo filters.
+
+        Returns:
+            List of filter IDs, e.g., ['None', 'Aqua', 'ArtDeco', 'Ink', 'Wash', 'Pastel', 'Feuve']
+        """
+        # Return cached data if available
+        if self._photo_filter_list_cache:
+            # Extract filter_id from each filter dict
+            return [f.get("filter_id", "") for f in self._photo_filter_list_cache if f.get("filter_id")]
+
         if not self._ws_art:
             _LOGGING.debug("Cannot get filters: art websocket not connected")
             return []
@@ -2066,6 +2111,7 @@ class SamsungTVWS:
                 ws_socket=self._ws_art,
             )
             _LOGGING.debug("Requested photo filter list")
+            # Response will be cached by event handler asynchronously
             return []
         except Exception as exc:
             _LOGGING.error("Error getting photo filter list: %s", exc)
@@ -2275,8 +2321,24 @@ class SamsungTVWS:
             include_color: If True, returns (matte_list, color_list) tuple
 
         Returns:
-            List of matte styles, or tuple of (matte_list, color_list) if include_color=True
+            List of matte dicts with keys like 'matte_type', 'matte_id', 'color_list'
         """
+        # Return cached data if available
+        if self._matte_list_cache:
+            if include_color:
+                # Extract matte types and color lists
+                matte_types = []
+                color_lists = []
+                for matte in self._matte_list_cache:
+                    if matte_type := matte.get("matte_type") or matte.get("matte_id"):
+                        matte_types.append(matte_type)
+                    if color_list := matte.get("color_list"):
+                        color_lists.append(color_list)
+                return (matte_types, color_lists) if matte_types else None
+            else:
+                # Return just the list of matte dicts
+                return self._matte_list_cache
+
         if not self._ws_art:
             _LOGGING.debug("Cannot get matte list: art websocket not connected")
             return None
@@ -2300,7 +2362,7 @@ class SamsungTVWS:
                 ws_socket=self._ws_art,
             )
             _LOGGING.debug("Requested matte list")
-            # Response would be handled in event handler
+            # Response will be cached by event handler asynchronously
             return None
         except Exception as exc:
             _LOGGING.error("Error getting matte list: %s", exc)

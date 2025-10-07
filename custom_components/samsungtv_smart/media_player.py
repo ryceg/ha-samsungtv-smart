@@ -96,9 +96,6 @@ from .const import (
     MAX_WOL_REPEAT,
     SERVICE_SELECT_PICTURE_MODE,
     SERVICE_SET_ART_MODE,
-    SERVICE_SET_ART_BRIGHTNESS,
-    SERVICE_SET_ART_COLOR_TEMPERATURE,
-    SERVICE_CHANGE_ARTWORK_MATTE,
     SERVICE_SET_ARTWORK_FAVORITE,
     SERVICE_SET_ART_SLIDESHOW,
     SIGNAL_CONFIG_ENTITY,
@@ -231,33 +228,7 @@ async def async_setup_entry(
         {vol.Required("artwork_id"): cv.string},
         "async_delete_artwork",
     )
-    platform.async_register_entity_service(
-        "set_photo_filter",
-        {
-            vol.Required("artwork_id"): cv.string,
-            vol.Required("filter"): cv.string,
-        },
-        "async_set_photo_filter",
-    )
-    platform.async_register_entity_service(
-        SERVICE_SET_ART_BRIGHTNESS,
-        {vol.Required("brightness"): vol.All(vol.Coerce(int), vol.Range(min=0, max=10))},
-        "async_set_art_brightness",
-    )
-    platform.async_register_entity_service(
-        SERVICE_SET_ART_COLOR_TEMPERATURE,
-        {vol.Required("temperature"): vol.All(vol.Coerce(int), vol.Range(min=-5, max=5))},
-        "async_set_art_color_temperature",
-    )
-    platform.async_register_entity_service(
-        SERVICE_CHANGE_ARTWORK_MATTE,
-        {
-            vol.Required("artwork_id"): cv.string,
-            vol.Optional("matte_id"): cv.string,
-            vol.Optional("portrait_matte_id"): cv.string,
-        },
-        "async_change_artwork_matte",
-    )
+    # Art Mode services for artwork management (brightness, color temp, matte, and filter now via entities)
     platform.async_register_entity_service(
         SERVICE_SET_ARTWORK_FAVORITE,
         {
@@ -1416,52 +1387,6 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
             self._ws.delete_artwork, artwork_id
         )
         _LOGGER.info("Deleted artwork %s from %s", artwork_id, self.name)
-
-    async def async_set_photo_filter(self, artwork_id: str, filter: str) -> None:
-        """Apply a photo filter to an artwork."""
-        if not self._ws.art_mode_supported():
-            _LOGGER.error("Art mode not supported on this TV")
-            return
-
-        await self.hass.async_add_executor_job(
-            self._ws.set_photo_filter, artwork_id, filter
-        )
-        _LOGGER.info("Applied filter '%s' to artwork %s on %s", filter, artwork_id, self.name)
-
-    async def async_set_art_brightness(self, brightness: int) -> None:
-        """Set Art Mode brightness."""
-        if not self._ws.art_mode_supported():
-            _LOGGER.error("Art mode not supported on this TV")
-            return
-
-        await self.hass.async_add_executor_job(
-            self._ws.set_brightness, brightness
-        )
-        _LOGGER.info("Set Art Mode brightness to %d on %s", brightness, self.name)
-
-    async def async_set_art_color_temperature(self, temperature: int) -> None:
-        """Set Art Mode color temperature."""
-        if not self._ws.art_mode_supported():
-            _LOGGER.error("Art mode not supported on this TV")
-            return
-
-        await self.hass.async_add_executor_job(
-            self._ws.set_color_temperature, temperature
-        )
-        _LOGGER.info("Set Art Mode color temperature to %d on %s", temperature, self.name)
-
-    async def async_change_artwork_matte(
-        self, artwork_id: str, matte_id: str | None = None, portrait_matte_id: str | None = None
-    ) -> None:
-        """Change the matte/frame for an artwork."""
-        if not self._ws.art_mode_supported():
-            _LOGGER.error("Art mode not supported on this TV")
-            return
-
-        await self.hass.async_add_executor_job(
-            self._ws.change_matte, artwork_id, matte_id, portrait_matte_id
-        )
-        _LOGGER.info("Changed matte for artwork %s on %s", artwork_id, self.name)
 
     async def async_set_artwork_favorite(self, artwork_id: str, favorite: bool = True) -> None:
         """Mark an artwork as favorite."""
