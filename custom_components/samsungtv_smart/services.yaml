@@ -250,3 +250,158 @@ set_art_slideshow:
               value: "4"
             - label: "Store Art"
               value: "8"
+
+slideshow_next:
+  name: Slideshow Next
+  description: Advance to next artwork in slideshow queue.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: media_player
+
+slideshow_previous:
+  name: Slideshow Previous
+  description: Go back to previous artwork in slideshow.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: media_player
+
+slideshow_add_to_queue:
+  name: Slideshow Add to Queue
+  description: Add artwork to slideshow queue.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: media_player
+  fields:
+    artwork_id:
+      name: Artwork ID
+      description: ID of artwork to add to queue
+      required: true
+      example: "MY-F0020"
+      selector:
+        text:
+
+slideshow_remove_from_queue:
+  name: Slideshow Remove from Queue
+  description: Remove artwork from slideshow queue.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: media_player
+  fields:
+    artwork_id:
+      name: Artwork ID
+      description: ID of artwork to remove from queue
+      required: true
+      example: "MY-F0020"
+      selector:
+        text:
+
+slideshow_set_queue:
+  name: Slideshow Set Queue
+  description: Replace entire slideshow queue with new list.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: media_player
+  fields:
+    artwork_ids:
+      name: Artwork IDs
+      description: List of artwork IDs (comma-separated or JSON array)
+      required: true
+      example: "MY-F0020,MY-F0021,SAM-F0206"
+      selector:
+        text:
+
+slideshow_clear_queue:
+  name: Slideshow Clear Queue
+  description: Clear all artworks from slideshow queue.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: media_player
+
+slideshow_set_overlay:
+  name: Slideshow Set Overlay
+  description: Display text overlay immediately, skipping normal queue.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: media_player
+  fields:
+    file_path:
+      name: File Path
+      description: Path to overlay image file
+      required: true
+      example: "/config/www/overlay.png"
+      selector:
+        text:
+    duration:
+      name: Duration
+      description: How long to display overlay in seconds (0 = indefinite)
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: "seconds"
+    matte:
+      name: Matte
+      description: Optional matte style
+      example: "none"
+      selector:
+        text:
+
+slideshow_set_shuffle:
+  name: Slideshow Set Shuffle
+  description: Enable or disable shuffle mode for slideshow.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: media_player
+  fields:
+    shuffle:
+      name: Shuffle
+      description: Enable shuffle mode
+      default: true
+      selector:
+        boolean:
+
+slideshow_load_artworks:
+  name: Slideshow Load Artworks
+  description: Load available artworks from TV for random selection when queue is empty.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: media_player
+  fields:
+    category:
+      name: Category
+      description: Artwork category (2=My Pictures, 4=Favorites, 8=Store Art)
+      default: 2
+      selector:
+        select:
+          options:
+            - label: "My Pictures"
+              value: "2"
+            - label: "Favorites"
+              value: "4"
+            - label: "Store Art"
+              value: "8"
+
+slideshow_set_auto_random:
+  name: Slideshow Set Auto Random
+  description: Enable or disable automatic random artwork selection when queue is empty.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: media_player
+  fields:
+    enabled:
+      name: Enabled
+      description: Enable auto-random selection
+      default: true
+      selector:
+        boolean:

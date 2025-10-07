@@ -790,9 +790,11 @@ class SamsungTVWS:
     def _get_artmode_status(self):
         """Detect current art mode based on received message."""
         _LOGGING.debug("Sending get_art_status")
+        request_uuid = gen_uuid()
         msg_data = {
             "request": "get_artmode_status",
-            "id": gen_uuid(),
+            "id": request_uuid,
+            "request_id": request_uuid,
         }
         self._ws_send(
             {
@@ -886,6 +888,13 @@ class SamsungTVWS:
             if request_data_str:
                 try:
                     request_data = json.loads(request_data_str)
+                    request_type = request_data.get("request")
+                    _LOGGING.warning(
+                        "Received error for art mode request '%s': error_code=%s, data=%s",
+                        request_type,
+                        error_code,
+                        data,
+                    )
 
                     # Check for single thumbnail request (get_thumbnail)
                     content_id = request_data.get("content_id")
@@ -1002,26 +1011,36 @@ class SamsungTVWS:
                 except (json.JSONDecodeError, TypeError) as e:
                     _LOGGING.error("Failed to parse artmode settings: %s", e)
             return
-        elif event in ["get_brightness", "brightness"]:
-            # Response to get_brightness request
+        elif event in ["get_brightness", "brightness", "set_brightness"]:
+            # Response to get/set_brightness request
             brightness_value = data.get("value")
-            _LOGGING.debug("Received brightness response: %s", brightness_value)
+            _LOGGING.debug("Received brightness event: %s, value: %s", event, brightness_value)
             # Could cache or emit event here
             return
-        elif event in ["get_color_temperature", "color_temperature"]:
-            # Response to get_color_temperature request
+        elif event in [
+            "get_color_temperature",
+            "color_temperature",
+            "set_color_temperature",
+        ]:
+            # Response to get/set_color_temperature request
             temp_value = data.get("value")
-            _LOGGING.debug("Received color temperature response: %s", temp_value)
+            _LOGGING.debug(
+                "Received color temperature event: %s, value: %s", event, temp_value
+            )
             # Could cache or emit event here
             return
-        elif event in ["get_auto_rotation_status", "auto_rotation_status"]:
-            # Response to get_auto_rotation_status request
-            _LOGGING.debug("Received auto rotation status response: %s", data)
+        elif event in [
+            "get_auto_rotation_status",
+            "auto_rotation_status",
+            "set_auto_rotation_status",
+        ]:
+            # Response to get/set_auto_rotation_status request
+            _LOGGING.debug("Received auto rotation status event: %s, data: %s", event, data)
             # Could cache or emit event here
             return
-        elif event in ["get_matte_list", "matte_list"]:
-            # Response to get_matte_list request
-            _LOGGING.debug("Received matte list response: %s", data)
+        elif event in ["get_matte_list", "matte_list", "change_matte"]:
+            # Response to get_matte_list or change_matte request
+            _LOGGING.debug("Received matte event: %s, data: %s", event, data)
             # Parse and cache matte list (uses matte_type_list field)
             matte_list_str = data.get("matte_type_list") or data.get("matte_list")
             if matte_list_str:
@@ -1036,9 +1055,13 @@ class SamsungTVWS:
                 except (json.JSONDecodeError, TypeError) as e:
                     _LOGGING.error("Failed to parse matte list: %s", e)
             return
-        elif event in ["get_photo_filter_list", "photo_filter_list"]:
-            # Response to get_photo_filter_list request
-            _LOGGING.debug("Received photo filter list response: %s", data)
+        elif event in [
+            "get_photo_filter_list",
+            "photo_filter_list",
+            "set_photo_filter",
+        ]:
+            # Response to get/set_photo_filter_list request
+            _LOGGING.debug("Received photo filter list event: %s, data: %s", event, data)
             # Parse and cache filter list
             filter_list_str = data.get("filter_list")
             if filter_list_str:
@@ -1052,6 +1075,26 @@ class SamsungTVWS:
                             self._art_cache_update_callback()
                 except (json.JSONDecodeError, TypeError) as e:
                     _LOGGING.error("Failed to parse photo filter list: %s", e)
+            return
+        elif event == "favorite_changed":
+            _LOGGING.debug("Received favorite changed event: %s", data)
+            return
+        elif event in ["get_content_list", "content_list"]:
+            # Response to get_content_list request
+            _LOGGING.debug("Received content list event: %s", event)
+            content_list_str = data.get("content_list")
+            if content_list_str:
+                try:
+                    content_list = json.loads(content_list_str)
+                    if isinstance(content_list, list):
+                        # Store in cache with category key
+                        category = data.get("category", "unknown")
+                        if not hasattr(self, '_content_list_cache'):
+                            self._content_list_cache = {}
+                        self._content_list_cache[category] = content_list
+                        _LOGGING.debug("Cached content list for category %s: %d items", category, len(content_list))
+                except (json.JSONDecodeError, TypeError) as e:
+                    _LOGGING.error("Failed to parse content list: %s", e)
             return
         else:
             # Unknown message
@@ -1465,9 +1508,11 @@ class SamsungTVWS:
             return False
 
         try:
+            request_uuid = gen_uuid()
             msg_data = {
                 "request": "get_current_artwork",
-                "id": gen_uuid(),
+                "id": request_uuid,
+                "request_id": request_uuid,
             }
             self._ws_send(
                 {
@@ -1500,9 +1545,11 @@ class SamsungTVWS:
             return False
 
         try:
+            request_uuid = gen_uuid()
             msg_data = {
                 "request": "get_slideshow_status",
-                "id": gen_uuid(),
+                "id": request_uuid,
+                "request_id": request_uuid,
             }
             result = self._ws_send(
                 {
@@ -1531,9 +1578,11 @@ class SamsungTVWS:
             return []
 
         try:
+            request_uuid = gen_uuid()
             msg_data = {
                 "request": "get_content_list",
-                "id": gen_uuid(),
+                "id": request_uuid,
+                "request_id": request_uuid,
             }
             if category:
                 msg_data["category"] = category
@@ -1565,11 +1614,13 @@ class SamsungTVWS:
             return False
 
         try:
+            request_uuid = gen_uuid()
             msg_data = {
                 "request": "select_image",
                 "content_id": artwork_id,
                 "show": show,
-                "id": gen_uuid(),
+                "id": request_uuid,
+                "request_id": request_uuid,
             }
             self._ws_send(
                 {
@@ -2022,10 +2073,12 @@ class SamsungTVWS:
             return False
 
         try:
+            request_uuid = gen_uuid()
             msg_data = {
                 "request": "delete_image",
                 "content_id": artwork_id,
-                "id": gen_uuid(),
+                "id": request_uuid,
+                "request_id": request_uuid,
             }
             self._ws_send(
                 {
@@ -2053,10 +2106,12 @@ class SamsungTVWS:
             return False
 
         try:
+            request_uuid = gen_uuid()
             msg_data = {
                 "request": "delete_image_list",
                 "content_id_list": artwork_ids,
-                "id": gen_uuid(),
+                "id": request_uuid,
+                "request_id": request_uuid,
             }
             self._ws_send(
                 {
@@ -2093,9 +2148,11 @@ class SamsungTVWS:
             return []
 
         try:
+            request_uuid = gen_uuid()
             msg_data = {
                 "request": "get_photo_filter_list",
-                "id": gen_uuid(),
+                "id": request_uuid,
+                "request_id": request_uuid,
             }
             self._ws_send(
                 {
@@ -2124,11 +2181,13 @@ class SamsungTVWS:
             return False
 
         try:
+            request_uuid = gen_uuid()
             msg_data = {
                 "request": "set_photo_filter",
                 "content_id": artwork_id,
-                "filter": filter_name,
-                "id": gen_uuid(),
+                "filter_id": filter_name,
+                "id": request_uuid,
+                "request_id": request_uuid,
             }
             self._ws_send(
                 {
@@ -2179,10 +2238,12 @@ class SamsungTVWS:
             return False
 
         try:
+            request_uuid = gen_uuid()
             msg_data = {
                 "request": "set_brightness",
                 "value": value,
-                "id": gen_uuid(),
+                "id": request_uuid,
+                "request_id": request_uuid,
             }
             self._ws_send(
                 {
@@ -2225,10 +2286,12 @@ class SamsungTVWS:
             return False
 
         try:
+            request_uuid = gen_uuid()
             msg_data = {
                 "request": "set_color_temperature",
                 "value": value,
-                "id": gen_uuid(),
+                "id": request_uuid,
+                "request_id": request_uuid,
             }
             self._ws_send(
                 {
@@ -2272,9 +2335,11 @@ class SamsungTVWS:
             return None
 
         try:
+            request_uuid = gen_uuid()
             msg_data = {
                 "request": "get_artmode_settings",
-                "id": gen_uuid(),
+                "id": request_uuid,
+                "request_id": request_uuid,
             }
             self._ws_send(
                 {
@@ -2344,9 +2409,11 @@ class SamsungTVWS:
             return None
 
         try:
+            request_uuid = gen_uuid()
             msg_data = {
                 "request": "get_matte_list",
-                "id": gen_uuid(),
+                "id": request_uuid,
+                "request_id": request_uuid,
             }
             self._ws_send(
                 {
@@ -2386,10 +2453,12 @@ class SamsungTVWS:
             return False
 
         try:
+            request_uuid = gen_uuid()
             msg_data = {
                 "request": "change_matte",
                 "content_id": content_id,
-                "id": gen_uuid(),
+                "id": request_uuid,
+                "request_id": request_uuid,
             }
             if matte_id is not None:
                 msg_data["matte_id"] = matte_id
@@ -2427,11 +2496,13 @@ class SamsungTVWS:
             return False
 
         try:
+            request_uuid = gen_uuid()
             msg_data = {
                 "request": "change_favorite",
                 "content_id": content_id,
                 "status": status,
-                "id": gen_uuid(),
+                "id": request_uuid,
+                "request_id": request_uuid,
             }
             self._ws_send(
                 {
@@ -2459,9 +2530,11 @@ class SamsungTVWS:
             return None
 
         try:
+            request_uuid = gen_uuid()
             msg_data = {
                 "request": "get_auto_rotation_status",
-                "id": gen_uuid(),
+                "id": request_uuid,
+                "request_id": request_uuid,
             }
             self._ws_send(
                 {
@@ -2482,6 +2555,62 @@ class SamsungTVWS:
             _LOGGING.error("Error getting auto-rotation status: %s", exc)
             return None
 
+    def get_content_list(self, category: int = 2) -> list[dict]:
+        """Get list of available artworks from TV by category.
+
+        Args:
+            category: 2 = my pictures, 4 = favorites, 8 = store art
+
+        Returns:
+            List of artwork dicts with content_id and metadata
+        """
+        if not self._ws_art:
+            _LOGGING.debug("Cannot get content list: art websocket not connected")
+            return []
+
+        # Check cache first
+        if hasattr(self, '_content_list_cache') and category in self._content_list_cache:
+            _LOGGING.debug("Returning cached content list for category %d", category)
+            return self._content_list_cache[category]
+
+        try:
+            request_uuid = gen_uuid()
+
+            # Map category int to TV category string
+            category_map = {
+                2: "MY-C0002",  # My Pictures
+                4: "MY-C0004",  # Favorites
+                8: "MY-C0008",  # Store Art
+            }
+            category_str = category_map.get(category, "MY-C0002")
+
+            msg_data = {
+                "request": "get_content_list",
+                "category": category_str,
+                "id": request_uuid,
+                "request_id": request_uuid,
+            }
+            self._ws_send(
+                {
+                    "method": "ms.channel.emit",
+                    "params": {
+                        "data": json.dumps(msg_data),
+                        "to": "host",
+                        "event": "art_app_request",
+                    },
+                },
+                key_press_delay=0,
+                use_control=True,
+                ws_socket=self._ws_art,
+            )
+            _LOGGING.debug("Requested content list for category %d (%s)", category, category_str)
+
+            # Return empty list for now, response will be cached when received
+            return []
+        except Exception as exc:
+            _LOGGING.error("Error getting content list: %s", exc)
+            return []
+
     def set_auto_rotation_status(
         self,
         duration: int = 0,
@@ -2500,12 +2629,14 @@ class SamsungTVWS:
             return False
 
         try:
+            request_uuid = gen_uuid()
             msg_data = {
                 "request": "set_auto_rotation_status",
                 "duration": duration,
                 "type": "shuffleslideshow" if shuffle else "slideshow",
                 "category": category,
-                "id": gen_uuid(),
+                "id": request_uuid,
+                "request_id": request_uuid,
             }
             self._ws_send(
                 {

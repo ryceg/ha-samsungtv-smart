@@ -1,0 +1,64 @@
+{
+  "config": {
+    "step": {
+      "artwork_providers": {
+        "title": "Artwork Providers",
+        "description": "Configure external artwork sources for slideshow.",
+        "data": {
+          "media_folder_enabled": "Enable Media Folder",
+          "media_folder_path": "Media Folder Path",
+          "media_folder_patterns": "File Patterns",
+          "media_folder_recursive": "Recursive Scan",
+          "google_arts_enabled": "Enable Google Arts & Culture",
+          "bing_wallpaper_enabled": "Enable Bing Wallpapers",
+          "bing_wallpaper_region": "Bing Region",
+          "bing_wallpaper_history_days": "History Days"
+        },
+        "data_description": {
+          "media_folder_path": "Local directory path containing artwork images (e.g., /config/www/frame_art)",
+          "media_folder_patterns": "Comma-separated file patterns (e.g., *.jpg,*.png)",
+          "media_folder_recursive": "Scan subdirectories recursively",
+          "bing_wallpaper_region": "Region code for Bing wallpapers (e.g., en-US, de-DE)",
+          "bing_wallpaper_history_days": "Number of days of historical wallpapers to fetch (1-8)"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "menu": {
+        "menu_options": {
+          "source_list": "Sources List",
+          "app_list": "Apps List",
+          "channel_list": "Channels List",
+          "sync_ent": "Synchronized Entities",
+          "artwork_providers": "Artwork Providers",
+          "init": "Settings",
+          "adv_opt": "Advanced Options",
+          "save_exit": "Save & Exit"
+        }
+      },
+      "artwork_providers": {
+        "title": "Artwork Providers",
+        "description": "Configure external artwork sources for slideshow.",
+        "data": {
+          "media_folder_enabled": "Enable Media Folder",
+          "media_folder_path": "Media Folder Path",
+          "media_folder_patterns": "File Patterns",
+          "media_folder_recursive": "Recursive Scan",
+          "google_arts_enabled": "Enable Google Arts & Culture",
+          "bing_wallpaper_enabled": "Enable Bing Wallpapers",
+          "bing_wallpaper_region": "Bing Region",
+          "bing_wallpaper_history_days": "History Days"
+        },
+        "data_description": {
+          "media_folder_path": "Local directory path containing artwork images (e.g., /config/www/frame_art)",
+          "media_folder_patterns": "Comma-separated file patterns (e.g., *.jpg,*.png)",
+          "media_folder_recursive": "Scan subdirectories recursively",
+          "bing_wallpaper_region": "Region code for Bing wallpapers (e.g., en-US, de-DE)",
+          "bing_wallpaper_history_days": "Number of days of historical wallpapers to fetch (1-8)"
+        }
+      }
+    }
+  }
+}

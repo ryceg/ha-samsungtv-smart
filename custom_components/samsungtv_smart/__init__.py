@@ -42,6 +42,12 @@ from homeassistant.helpers.typing import ConfigType
 
 from .api.samsungws import ConnectionFailure, SamsungTVWS
 from .api.smartthings import SmartThingsTV
+from .providers import (
+    ProviderRegistry,
+    BingWallpaperProvider,
+    GoogleArtsProvider,
+    MediaFolderProvider,
+)
 from .const import (
     ATTR_DEVICE_MAC,
     ATTR_DEVICE_MODEL,
@@ -102,6 +108,8 @@ SAMSMART_PLATFORM = [
     Platform.IMAGE,
     Platform.NUMBER,
     Platform.SELECT,
+    Platform.SWITCH,
+    Platform.BUTTON,
 ]
 
 SAMSMART_SCHEMA = {
@@ -655,6 +663,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
     if add_conf:
         hass.data[DOMAIN][entry.entry_id][DATA_CFG_YAML] = add_conf
+
+    # Initialize artwork provider registry
+    provider_registry = ProviderRegistry()
+
+    # Initialize providers with config from entry options
+    provider_config = {
+        key: value
+        for key, value in entry.options.items()
+        if key.startswith(("media_folder_", "google_arts_", "bing_wallpaper_"))
+    }
+    await provider_registry.async_initialize_all(provider_config)
+
+    hass.data[DOMAIN][entry.entry_id]["provider_registry"] = provider_registry
+
     entry.async_on_unload(entry.add_update_listener(_update_listener))
 
     await hass.config_entries.async_forward_entry_setups(entry, SAMSMART_PLATFORM)

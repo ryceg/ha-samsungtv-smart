@@ -599,6 +599,11 @@ class OptionsFlowHandler(OptionsFlow):
             for key, values in config_entry.options.items()
             if key in [CONF_SYNC_TURN_OFF, CONF_SYNC_TURN_ON]
         }
+        self._provider_options = {
+            key: values
+            for key, values in config_entry.options.items()
+            if key.startswith(("media_folder_", "google_arts_", "bing_wallpaper_"))
+        }
         self._app_list = self._std_options.get(CONF_APP_LIST)
         self._channel_list = self._std_options.get(CONF_CHANNEL_LIST)
         self._source_list = self._std_options.get(CONF_SOURCE_LIST)
@@ -611,6 +616,8 @@ class OptionsFlowHandler(OptionsFlow):
         """Save configuration options"""
         data.update(self._adv_options)
         data.update(self._sync_ent_opt)
+        if hasattr(self, '_provider_options'):
+            data.update(self._provider_options)
         entry_data = {k: v for k, v in data.items() if v is not None}
         for key, value in entry_data.items():
             if key in ENUM_OPTIONS:
@@ -705,6 +712,7 @@ class OptionsFlowHandler(OptionsFlow):
                 "app_list",
                 "channel_list",
                 "sync_ent",
+                "artwork_providers",
                 "init",
                 "adv_opt",
                 "save_exit",
@@ -780,6 +788,36 @@ class OptionsFlowHandler(OptionsFlow):
             self._sync_ent_opt = user_input
             return await self.async_step_menu()
         return self._async_sync_ent_form()
+
+    async def async_step_artwork_providers(self, user_input=None) -> ConfigFlowResult:
+        """Handle artwork providers configuration."""
+        if user_input is not None:
+            self._provider_options = user_input
+            return await self.async_step_menu()
+        return self._async_artwork_providers_form()
+
+    @callback
+    def _async_artwork_providers_form(self) -> ConfigFlowResult:
+        """Return configuration form for artwork providers."""
+        options = _validate_options(self._provider_options if hasattr(self, '_provider_options') else {})
+
+        data_schema = vol.Schema({
+            # Media Folder
+            vol.Optional("media_folder_enabled", default=options.get("media_folder_enabled", False)): bool,
+            vol.Optional("media_folder_path", default=options.get("media_folder_path", "/config/www/frame_art")): str,
+            vol.Optional("media_folder_patterns", default=options.get("media_folder_patterns", "*.jpg,*.png")): str,
+            vol.Optional("media_folder_recursive", default=options.get("media_folder_recursive", True)): bool,
+
+            # Google Arts
+            vol.Optional("google_arts_enabled", default=options.get("google_arts_enabled", False)): bool,
+
+            # Bing Wallpapers
+            vol.Optional("bing_wallpaper_enabled", default=options.get("bing_wallpaper_enabled", False)): bool,
+            vol.Optional("bing_wallpaper_region", default=options.get("bing_wallpaper_region", "en-US")): str,
+            vol.Optional("bing_wallpaper_history_days", default=options.get("bing_wallpaper_history_days", 7)): vol.All(vol.Coerce(int), vol.Range(min=1, max=8)),
+        })
+
+        return self.async_show_form(step_id="artwork_providers", data_schema=data_schema)
 
     @callback
     def _async_sync_ent_form(self) -> ConfigFlowResult:

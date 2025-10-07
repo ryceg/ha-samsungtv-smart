@@ -246,6 +246,61 @@ async def async_setup_entry(
         },
         "async_set_art_slideshow",
     )
+    # Slideshow queue management services
+    platform.async_register_entity_service(
+        "slideshow_next",
+        {},
+        "async_slideshow_next",
+    )
+    platform.async_register_entity_service(
+        "slideshow_previous",
+        {},
+        "async_slideshow_previous",
+    )
+    platform.async_register_entity_service(
+        "slideshow_add_to_queue",
+        {vol.Required("artwork_id"): cv.string},
+        "async_slideshow_add_to_queue",
+    )
+    platform.async_register_entity_service(
+        "slideshow_remove_from_queue",
+        {vol.Required("artwork_id"): cv.string},
+        "async_slideshow_remove_from_queue",
+    )
+    platform.async_register_entity_service(
+        "slideshow_set_queue",
+        {vol.Required("artwork_ids"): cv.string},
+        "async_slideshow_set_queue",
+    )
+    platform.async_register_entity_service(
+        "slideshow_clear_queue",
+        {},
+        "async_slideshow_clear_queue",
+    )
+    platform.async_register_entity_service(
+        "slideshow_set_overlay",
+        {
+            vol.Required("file_path"): cv.string,
+            vol.Optional("duration", default=30): vol.All(vol.Coerce(int), vol.Range(min=0, max=300)),
+            vol.Optional("matte"): cv.string,
+        },
+        "async_slideshow_set_overlay",
+    )
+    platform.async_register_entity_service(
+        "slideshow_set_shuffle",
+        {vol.Optional("shuffle", default=True): cv.boolean},
+        "async_slideshow_set_shuffle",
+    )
+    platform.async_register_entity_service(
+        "slideshow_load_artworks",
+        {vol.Optional("category", default="2"): vol.All(cv.string, vol.In(["2", "4", "8"]))},
+        "async_slideshow_load_artworks",
+    )
+    platform.async_register_entity_service(
+        "slideshow_set_auto_random",
+        {vol.Optional("enabled", default=True): cv.boolean},
+        "async_slideshow_set_auto_random",
+    )
 
 
 def _get_default_app_info(app_id):
@@ -1418,6 +1473,189 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
             "Set slideshow on %s: duration=%d min, shuffle=%s, category=%d",
             self.name, duration, shuffle, category_int
         )
+
+    def _get_slideshow_queue(self):
+        """Get the slideshow queue manager for this TV."""
+        if DOMAIN not in self.hass.data:
+            return None
+        entry_data = self.hass.data[DOMAIN].get(self._entry_id)
+        if not entry_data:
+            return None
+        return entry_data.get("slideshow_queue")
+
+    async def async_slideshow_next(self) -> None:
+        """Advance to next artwork in slideshow queue."""
+        queue_manager = self._get_slideshow_queue()
+        if not queue_manager:
+            _LOGGER.error("Slideshow queue not initialized")
+            return
+
+        next_artwork = queue_manager.get_next()
+        if next_artwork:
+            await self.async_select_artwork(next_artwork.get("content_id"), show=True)
+            _LOGGER.info("Advanced to next artwork in slideshow")
+        else:
+            _LOGGER.warning("No next artwork in slideshow queue")
+
+    async def async_slideshow_previous(self) -> None:
+        """Go back to previous artwork in slideshow."""
+        queue_manager = self._get_slideshow_queue()
+        if not queue_manager:
+            _LOGGER.error("Slideshow queue not initialized")
+            return
+
+        prev_artwork = queue_manager.get_previous()
+        if prev_artwork:
+            await self.async_select_artwork(prev_artwork.get("content_id"), show=True)
+            _LOGGER.info("Went back to previous artwork in slideshow")
+        else:
+            _LOGGER.warning("No previous artwork in slideshow history")
+
+    async def async_slideshow_add_to_queue(self, artwork_id: str) -> None:
+        """Add artwork to slideshow queue."""
+        queue_manager = self._get_slideshow_queue()
+        if not queue_manager:
+            _LOGGER.error("Slideshow queue not initialized")
+            return
+
+        # Create artwork dict with minimal info
+        artwork = {"content_id": artwork_id}
+        queue_manager.add_to_queue(artwork)
+        _LOGGER.info("Added artwork %s to slideshow queue", artwork_id)
+
+    async def async_slideshow_remove_from_queue(self, artwork_id: str) -> None:
+        """Remove artwork from slideshow queue."""
+        queue_manager = self._get_slideshow_queue()
+        if not queue_manager:
+            _LOGGER.error("Slideshow queue not initialized")
+            return
+
+        if queue_manager.remove_from_queue(artwork_id):
+            _LOGGER.info("Removed artwork %s from slideshow queue", artwork_id)
+        else:
+            _LOGGER.warning("Artwork %s not found in slideshow queue", artwork_id)
+
+    async def async_slideshow_set_queue(self, artwork_ids: str) -> None:
+        """Replace entire slideshow queue with new list."""
+        queue_manager = self._get_slideshow_queue()
+        if not queue_manager:
+            _LOGGER.error("Slideshow queue not initialized")
+            return
+
+        # Parse artwork_ids (comma-separated or JSON array)
+        import json
+        try:
+            # Try JSON first
+            ids_list = json.loads(artwork_ids)
+            if not isinstance(ids_list, list):
+                ids_list = [str(ids_list)]
+        except json.JSONDecodeError:
+            # Fall back to comma-separated
+            ids_list = [id.strip() for id in artwork_ids.split(",")]
+
+        artworks = [{"content_id": artwork_id} for artwork_id in ids_list if artwork_id]
+        queue_manager.set_queue(artworks)
+        _LOGGER.info("Set slideshow queue with %d artworks", len(artworks))
+
+    async def async_slideshow_clear_queue(self) -> None:
+        """Clear all artworks from slideshow queue."""
+        queue_manager = self._get_slideshow_queue()
+        if not queue_manager:
+            _LOGGER.error("Slideshow queue not initialized")
+            return
+
+        queue_manager.clear()
+        _LOGGER.info("Cleared slideshow queue")
+
+    async def async_slideshow_set_overlay(
+        self, file_path: str, duration: int = 30, matte: str | None = None
+    ) -> None:
+        """Display text overlay immediately, skipping normal queue."""
+        queue_manager = self._get_slideshow_queue()
+        if not queue_manager:
+            _LOGGER.error("Slideshow queue not initialized")
+            return
+
+        # Upload the overlay image
+        file_type = "PNG" if file_path.lower().endswith(".png") else "JPEG"
+        content_id = await self.async_upload_artwork(file_path, file_type, matte)
+
+        if content_id:
+            # Add to overlay queue (skips normal queue)
+            overlay_artwork = {"content_id": content_id}
+            queue_manager.add_overlay(overlay_artwork)
+
+            # Display immediately
+            await self.async_select_artwork(content_id, show=True)
+            _LOGGER.info("Displayed overlay %s (duration=%ds)", content_id, duration)
+
+            # Schedule removal if duration > 0
+            if duration > 0:
+                async def _remove_overlay(now):
+                    await self.async_delete_artwork(content_id)
+                    await self.async_slideshow_next()  # Move to next in queue
+
+                from homeassistant.helpers.event import async_call_later
+                async_call_later(self.hass, duration, _remove_overlay)
+
+    async def async_slideshow_set_shuffle(self, shuffle: bool = True) -> None:
+        """Enable or disable shuffle mode for slideshow."""
+        queue_manager = self._get_slideshow_queue()
+        if not queue_manager:
+            _LOGGER.error("Slideshow queue not initialized")
+            return
+
+        queue_manager.shuffle = shuffle
+        _LOGGER.info("Set slideshow shuffle mode to %s", shuffle)
+
+    async def async_slideshow_load_artworks(self, category: str = "2") -> None:
+        """Load available artworks from TV and external providers."""
+        queue_manager = self._get_slideshow_queue()
+        if not queue_manager:
+            _LOGGER.error("Slideshow queue not initialized")
+            return
+
+        category_int = int(category)
+        queue_manager.set_category(category_int)
+
+        all_artworks = []
+
+        # Load TV artworks
+        if self._ws and hasattr(self._ws, 'get_content_list'):
+            try:
+                tv_artworks = await self.hass.async_add_executor_job(
+                    self._ws.get_content_list, category_int
+                )
+                if tv_artworks:
+                    all_artworks.extend(tv_artworks)
+                    _LOGGER.info("Loaded %d artworks from TV (category %d)", len(tv_artworks), category_int)
+            except Exception as exc:
+                _LOGGER.warning("Failed to load TV artworks: %s", exc)
+
+        # Load external provider artworks
+        provider_registry = self.hass.data[DOMAIN][self._entry_id].get("provider_registry")
+        if provider_registry:
+            try:
+                provider_artworks = await provider_registry.async_load_all_artworks()
+                for provider_name, artworks in provider_artworks.items():
+                    if artworks:
+                        all_artworks.extend(artworks)
+                        _LOGGER.info("Loaded %d artworks from %s", len(artworks), provider_name)
+            except Exception as exc:
+                _LOGGER.warning("Failed to load provider artworks: %s", exc)
+
+        queue_manager.set_available_artworks(all_artworks)
+        _LOGGER.info("Total available artworks: %d", len(all_artworks))
+
+    async def async_slideshow_set_auto_random(self, enabled: bool = True) -> None:
+        """Enable or disable automatic random artwork selection."""
+        queue_manager = self._get_slideshow_queue()
+        if not queue_manager:
+            _LOGGER.error("Slideshow queue not initialized")
+            return
+
+        queue_manager.set_auto_random(enabled)
+        _LOGGER.info("Set slideshow auto-random to %s", enabled)
 
     def _turn_off(self):
         """Turn off media player."""
