@@ -105,25 +105,8 @@ class GoogleArtsProvider(ArtworkProvider):
 
         This provides a basic set of artworks when the API is unavailable.
         """
-        # Famous artworks with known asset IDs (examples)
-        # In production, you'd want to maintain a larger curated list
-        fallback_artworks = [
-            {
-                "id": "google_arts_starry_night",
-                "source": self.name,
-                "title": "The Starry Night - Vincent van Gogh",
-                "url": "https://lh3.googleusercontent.com/ci/ALrDzOayKrTVgk5w_9DXhk9QdIJzKLSGBmzZIHkEVCp5yQXmP5CxZGVlWtXVGEVHdGxJjwlmOQ=s2048",
-            },
-            {
-                "id": "google_arts_mona_lisa",
-                "source": self.name,
-                "title": "Mona Lisa - Leonardo da Vinci",
-                "url": "https://lh3.googleusercontent.com/ci/ALrDzOa1JLpOk-uD0r8hQ0v0EqKxmfFx5VVxGYYJJUYVJl-8vPfSMVKN8qMHYAvMfVAwSw=s2048",
-            },
-        ]
-
-        _LOGGER.info("Using fallback artworks from Google Arts")
-        return fallback_artworks
+        _LOGGER.warning("Google Arts & Culture API unavailable, no fallback artworks configured")
+        return []
 
     async def async_get_artwork_data(self, artwork_id: str) -> bytes | None:
         """Download artwork image data.

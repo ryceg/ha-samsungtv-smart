@@ -128,6 +128,13 @@ class ProviderRegistry:
         """Get provider by config key."""
         return self._providers.get(config_key)
 
+    def get_provider_by_name(self, name: str) -> ArtworkProvider | None:
+        """Get provider by display name."""
+        for provider in self._providers.values():
+            if provider.name == name:
+                return provider
+        return None
+
     def get_all_providers(self) -> list[ArtworkProvider]:
         """Get all registered providers."""
         return list(self._providers.values())
@@ -166,4 +173,10 @@ from .media_folder import MediaFolderProvider  # noqa: E402
 from .google_arts import GoogleArtsProvider  # noqa: E402
 from .bing_wallpaper import BingWallpaperProvider  # noqa: E402
 
-__all__ = ["ArtworkProvider", "ProviderRegistry"]
+__all__ = [
+    "ArtworkProvider",
+    "ProviderRegistry",
+    "MediaFolderProvider",
+    "GoogleArtsProvider",
+    "BingWallpaperProvider",
+]

@@ -48,6 +48,7 @@ from .providers import (
     GoogleArtsProvider,
     MediaFolderProvider,
 )
+from .slideshow import SlideshowQueueManager
 from .const import (
     ATTR_DEVICE_MAC,
     ATTR_DEVICE_MODEL,
@@ -351,7 +352,7 @@ def get_smartthings_entries(hass: HomeAssistant) -> dict[str, str] | None:
     return {
         entry.unique_id: entry.title
         for entry in entries_list
-        if CONF_TOKEN in entry.data
+        if CONF_TOKEN in entry.data and entry.unique_id is not None
     }
 
 
@@ -679,6 +680,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry.async_on_unload(entry.add_update_listener(_update_listener))
 
+    # Create and store slideshow queue manager
+    hass.data[DOMAIN][entry.entry_id]["slideshow_queue"] = SlideshowQueueManager()
+
+    # Forward setup to all platforms
     await hass.config_entries.async_forward_entry_setups(entry, SAMSMART_PLATFORM)
 
     return True

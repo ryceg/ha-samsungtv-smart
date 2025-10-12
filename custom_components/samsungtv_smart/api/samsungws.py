@@ -539,7 +539,7 @@ class SamsungTVWS:
     def _on_message_remote(self, _, message):
         """Manage messages received by remote WS connection."""
         response = _process_api_response(message)
-        _LOGGING.debug(response)
+        # _LOGGING.debug(response)
         event = response.get("event")
         if not event:
             return
@@ -786,6 +786,7 @@ class SamsungTVWS:
         elif event == "d2d_service_message":
             _LOGGING.debug("Message art: d2d message")
             self._handle_artmode_status(response)
+            return
 
     def _get_artmode_status(self):
         """Detect current art mode based on received message."""
@@ -938,6 +939,12 @@ class SamsungTVWS:
                     )
             _LOGGING.debug("Unknown art mode error event: %s", data)
             return
+        elif event == "select_image":
+            # Acknowledgment of select_image request
+            request_id = data.get("request_id")
+            content_id = data.get("content_id")
+            _LOGGING.debug("Received select_image acknowledgment: content_id=%s, request_id=%s", content_id, request_id)
+            return
         elif event == "image_selected":
             content_id = data.get("content_id")
             if content_id and content_id in self._pending_thumbnail_requests:
@@ -982,14 +989,29 @@ class SamsungTVWS:
                 except Exception as exc:
                     _LOGGING.error("Error processing upload ready event: %s", exc)
             return
+        elif event == "send_image":
+            # Intermediate event during upload with request_id
+            content_id = data.get("content_id")
+            request_id = data.get("request_id")
+
+            _LOGGING.debug("Upload send_image event: content_id=%s, request_id=%s", content_id, request_id)
+
+            # Signal the waiting upload request
+            if request_id and request_id in self._pending_upload_requests:
+                pending_request = self._pending_upload_requests[request_id]
+                pending_request['content_id'] = content_id
+                pending_request['event'].set()
+            else:
+                _LOGGING.debug("send_image event for non-pending request_id: %s", request_id)
+            return
         elif event == "image_added":
-            # Artwork upload completed successfully
+            # Artwork upload completed successfully (final confirmation)
             content_id = data.get("content_id")
             request_id = data.get("request_id")
 
             _LOGGING.info("Artwork upload completed: content_id=%s, request_id=%s", content_id, request_id)
 
-            # Signal the waiting upload request
+            # Signal the waiting upload request if not already signaled
             if request_id and request_id in self._pending_upload_requests:
                 pending_request = self._pending_upload_requests[request_id]
                 pending_request['content_id'] = content_id
@@ -2568,21 +2590,21 @@ class SamsungTVWS:
             _LOGGING.debug("Cannot get content list: art websocket not connected")
             return []
 
-        # Check cache first
-        if hasattr(self, '_content_list_cache') and category in self._content_list_cache:
-            _LOGGING.debug("Returning cached content list for category %d", category)
-            return self._content_list_cache[category]
+        # Map category int to TV category string first
+        category_map = {
+            2: "MY-C0002",  # My Pictures
+            4: "MY-C0004",  # Favorites
+            8: "MY-C0008",  # Store Art
+        }
+        category_str = category_map.get(category, "MY-C0002")
+
+        # Check cache first (using category_str to match how it's stored)
+        if hasattr(self, '_content_list_cache') and category_str in self._content_list_cache:
+            _LOGGING.debug("Returning cached content list for category %d (%s)", category, category_str)
+            return self._content_list_cache[category_str]
 
         try:
             request_uuid = gen_uuid()
-
-            # Map category int to TV category string
-            category_map = {
-                2: "MY-C0002",  # My Pictures
-                4: "MY-C0004",  # Favorites
-                8: "MY-C0008",  # Store Art
-            }
-            category_str = category_map.get(category, "MY-C0002")
 
             msg_data = {
                 "request": "get_content_list",

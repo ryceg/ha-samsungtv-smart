@@ -17,6 +17,7 @@ from homeassistant.helpers.event import async_call_later, async_track_state_chan
 
 from .const import DATA_CFG, DATA_WS, DOMAIN
 from .entity import SamsungTVEntity
+from .slideshow import SlideshowQueueManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ async def async_setup_entry(
         """Create art mode image entity after media player is ready."""
         config = hass.data[DOMAIN][config_entry.entry_id][DATA_CFG]
         ws_instance = hass.data[DOMAIN][config_entry.entry_id].get(DATA_WS)
+        queue_manager = hass.data[DOMAIN][config_entry.entry_id].get("slideshow_queue")
         _LOGGER.debug("Image setup: ws_instance = %s", "present" if ws_instance else "None")
 
         # Find the media player entity for this TV using entity registry
@@ -64,11 +66,20 @@ async def async_setup_entry(
             return
 
         # Create art mode image entity with WebSocket instance
-        entity = ArtModeImageEntity(hass, config, config_entry.entry_id, media_player_entity_id, ws_instance)
-        async_add_entities([entity])
+        entities = [ArtModeImageEntity(hass, config, config_entry.entry_id, media_player_entity_id, ws_instance)]
+
+        # Add slideshow preview images if queue manager is available
+        if queue_manager:
+            entities.extend([
+                SlideshowCurrentImage(hass, config, config_entry.entry_id, media_player_entity_id, queue_manager),
+                SlideshowUpNextImage(hass, config, config_entry.entry_id, media_player_entity_id, queue_manager),
+                SlideshowPreviousImage(hass, config, config_entry.entry_id, media_player_entity_id, queue_manager),
+            ])
+
+        async_add_entities(entities)
         _LOGGER.debug(
-            "Successfully set up art mode image for %s",
-            config.get(CONF_HOST, "unknown")
+            "Successfully set up %d image entities for %s",
+            len(entities), config.get(CONF_HOST, "unknown")
         )
 
     # Wait for TV media player entity to be created and art mode detection to complete
@@ -228,3 +239,161 @@ class ArtModeImageEntity(SamsungTVEntity, ImageEntity):
             "artwork_category": artwork_data.get("category"),
             "media_player_entity_id": self._media_player_entity_id,
         }
+
+
+class SlideshowImageBase(SamsungTVEntity, ImageEntity):
+    """Base class for slideshow preview images."""
+
+    _attr_has_entity_name = True
+    _attr_content_type = "image/jpeg"
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config: dict[str, Any],
+        entry_id: str,
+        media_player_entity_id: str,
+        queue_manager: SlideshowQueueManager,
+    ) -> None:
+        """Initialize the slideshow image entity."""
+        self._entry_id = entry_id
+        self._media_player_entity_id = media_player_entity_id
+        self._queue_manager = queue_manager
+        self._ws = None
+
+        SamsungTVEntity.__init__(self, config, entry_id)
+        ImageEntity.__init__(self, hass)
+
+        self._cached_image: bytes | None = None
+        self._last_artwork_id: str | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Set up when entity is added to hass."""
+        await super().async_added_to_hass()
+        # Get WebSocket instance after entity is added
+        self._ws = self.hass.data[DOMAIN][self._entry_id].get(DATA_WS)
+
+    @property
+    def entity_picture(self) -> str | None:
+        """Return entity picture URL, handling empty access tokens."""
+        if not self.access_tokens:
+            return None
+        return super().entity_picture
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        media_player_state = self.hass.states.get(self._media_player_entity_id)
+        if not media_player_state:
+            return False
+        art_mode_supported = media_player_state.attributes.get("art_mode_supported", False)
+        return art_mode_supported and self._ws is not None
+
+    async def _get_artwork_image(self, artwork: dict | None) -> bytes | None:
+        """Get image bytes for an artwork."""
+        if not artwork:
+            return None
+
+        content_id = artwork.get("content_id")
+        if not content_id:
+            return None
+
+        # Check if artwork changed
+        if content_id != self._last_artwork_id:
+            self._cached_image = None
+            self._last_artwork_id = content_id
+
+        # Return cached image if available
+        if self._cached_image:
+            return self._cached_image
+
+        if not self._ws:
+            return None
+
+        try:
+            thumbnail = await self.hass.async_add_executor_job(
+                self._ws.get_artwork_thumbnail, content_id
+            )
+            if thumbnail:
+                self._cached_image = thumbnail
+                return thumbnail
+        except Exception as exc:
+            _LOGGER.debug("Error fetching artwork thumbnail for %s: %s", content_id, exc)
+
+        return None
+
+
+class SlideshowCurrentImage(SlideshowImageBase):
+    """Image entity showing current slideshow artwork."""
+
+    _attr_name = "Slideshow current"
+    _attr_icon = "mdi:image"
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config: dict[str, Any],
+        entry_id: str,
+        media_player_entity_id: str,
+        queue_manager: SlideshowQueueManager,
+    ) -> None:
+        """Initialize the current image entity."""
+        super().__init__(hass, config, entry_id, media_player_entity_id, queue_manager)
+        self._attr_unique_id = f"{entry_id}_slideshow_current_image"
+
+    async def async_image(self) -> bytes | None:
+        """Return bytes of current slideshow artwork."""
+        current = self._queue_manager.get_current()
+        return await self._get_artwork_image(current)
+
+
+class SlideshowUpNextImage(SlideshowImageBase):
+    """Image entity showing next slideshow artwork."""
+
+    _attr_name = "Slideshow up next"
+    _attr_icon = "mdi:skip-next-outline"
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config: dict[str, Any],
+        entry_id: str,
+        media_player_entity_id: str,
+        queue_manager: SlideshowQueueManager,
+    ) -> None:
+        """Initialize the up next image entity."""
+        super().__init__(hass, config, entry_id, media_player_entity_id, queue_manager)
+        self._attr_unique_id = f"{entry_id}_slideshow_up_next_image"
+
+    async def async_image(self) -> bytes | None:
+        """Return bytes of next slideshow artwork."""
+        next_artwork = self._queue_manager.peek_next()
+        return await self._get_artwork_image(next_artwork)
+
+
+class SlideshowPreviousImage(SlideshowImageBase):
+    """Image entity showing previous slideshow artwork."""
+
+    _attr_name = "Slideshow previous"
+    _attr_icon = "mdi:skip-previous-outline"
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config: dict[str, Any],
+        entry_id: str,
+        media_player_entity_id: str,
+        queue_manager: SlideshowQueueManager,
+    ) -> None:
+        """Initialize the previous image entity."""
+        super().__init__(hass, config, entry_id, media_player_entity_id, queue_manager)
+        self._attr_unique_id = f"{entry_id}_slideshow_previous_image"
+
+    async def async_image(self) -> bytes | None:
+        """Return bytes of previous slideshow artwork."""
+        if len(self._queue_manager._history) < 2:
+            return None
+        # Get the second-to-last entry from history
+        prev_entry = list(self._queue_manager._history)[-2]
+        prev_artwork = prev_entry.get("artwork")
+        return await self._get_artwork_image(prev_artwork)

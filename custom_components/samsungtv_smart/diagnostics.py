@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from homeassistant.components.diagnostics import REDACTED, async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_API_KEY, CONF_ID, CONF_MAC, CONF_TOKEN
@@ -28,7 +30,70 @@ async def async_get_config_entry_diagnostics(
     if hass_data:
         diag_data["device"] = hass_data
 
+    # Include Samsung TV API v2 device information
+    api_info = await _async_get_tv_api_info(hass, entry)
+    if api_info:
+        diag_data["tv_api_info"] = api_info
+
     return diag_data
+
+
+async def _async_get_tv_api_info(hass: HomeAssistant, entry: ConfigEntry) -> dict | None:
+    """Get Samsung TV API v2 device information."""
+    try:
+        # Try to get the media player coordinator
+        if entry.entry_id not in hass.data[DOMAIN]:
+            return None
+
+        coordinator = hass.data[DOMAIN][entry.entry_id]
+        if not hasattr(coordinator, "_device_info"):
+            return None
+
+        device_info = coordinator._device_info
+        if not device_info:
+            return None
+
+        # Extract useful diagnostic information from API v2 response
+        api_data = {}
+
+        # Device information
+        if "device" in device_info:
+            device = device_info["device"]
+            api_data["device"] = {
+                "os": device.get("OS"),
+                "model": device.get("model"),
+                "model_name": device.get("modelName"),
+                "firmware_version": device.get("firmwareVersion"),
+                "resolution": device.get("resolution"),
+                "network_type": device.get("networkType"),
+                "frame_tv_support": device.get("FrameTVSupport"),
+                "token_auth_support": device.get("TokenAuthSupport"),
+                "voice_support": device.get("VoiceSupport"),
+                "gamepad_support": device.get("GamePadSupport"),
+                "ime_synced_support": device.get("ImeSyncedSupport"),
+                "developer_mode": device.get("developerMode"),
+                "power_state": device.get("PowerState"),
+                "language": device.get("Language"),
+                "country_code": device.get("countryCode"),
+                "wall_service": device.get("WallService"),
+                "edge_blending_support": device.get("EdgeBlendingSupport"),
+            }
+
+        # API version and support information
+        if "version" in device_info:
+            api_data["api_version"] = device_info["version"]
+
+        if "isSupport" in device_info:
+            try:
+                support_info = json.loads(device_info["isSupport"])
+                api_data["supported_features"] = support_info
+            except (json.JSONDecodeError, TypeError):
+                api_data["supported_features"] = device_info["isSupport"]
+
+        return api_data
+
+    except Exception:  # pylint: disable=broad-except
+        return None
 
 
 @callback

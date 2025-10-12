@@ -26,10 +26,7 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Samsung TV art mode number entities."""
-    # Also set up slideshow number entities
-    from .slideshow import async_setup_entry as slideshow_setup
-    await slideshow_setup(hass, config_entry, async_add_entities)
+    """Set up Samsung TV art mode and slideshow number entities."""
 
     @callback
     def _add_art_mode_numbers(utc_now: datetime) -> None:

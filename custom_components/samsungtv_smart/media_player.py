@@ -419,6 +419,9 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
         if entry_data:
             entry_data[DATA_WS] = self._ws
             _LOGGER.debug("Stored WebSocket instance in hass.data for entry %s", entry_id)
+            queue_manager = entry_data.get("slideshow_queue")
+            if queue_manager:
+                queue_manager.set_ws_instance(self._ws)
         else:
             _LOGGER.warning("entry_data is None, cannot store WebSocket instance")
 
@@ -648,7 +651,7 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
             result = self._get_external_entity_status()
 
         if result:
-            if self._ws.artmode_status in (ArtModeStatus.On, ArtModeStatus.Unavailable):
+            if self._ws.artmode_status == ArtModeStatus.On:
                 result = False
 
         return result
@@ -959,7 +962,10 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
                 st_error = self._st.state != STStatus.STATE_ON
             self._log_st_error(st_error)
 
-        self._state = MediaPlayerState.ON if result else MediaPlayerState.OFF
+        if result:
+            self._state = MediaPlayerState.ON
+        else:
+            self._state = MediaPlayerState.OFF
         self._started_up = True
 
         # NB: We are checking properties, not attribute!
@@ -1431,6 +1437,81 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
             _LOGGER.error("Image file not found: %s", file_path)
         except Exception as exc:
             _LOGGER.error("Error uploading artwork: %s", exc)
+
+    async def async_upload_external_artwork(
+        self, artwork: dict, provider_registry=None
+    ) -> str | None:
+        """Download and upload an external artwork from a provider.
+
+        Args:
+            artwork: Artwork dict with 'id' and 'source' fields
+            provider_registry: Provider registry instance (optional, will use cached if not provided)
+
+        Returns:
+            Content ID of uploaded artwork, or None if failed
+        """
+        if not self._ws.art_mode_supported():
+            _LOGGER.error("Art mode not supported on this TV")
+            return None
+
+        # Get provider registry
+        if not provider_registry:
+            provider_registry = self.hass.data[DOMAIN].get(self._entry_id, {}).get("provider_registry")
+
+        if not provider_registry:
+            _LOGGER.error("Provider registry not found")
+            return None
+
+        artwork_id = artwork.get("id")
+        source = artwork.get("source")
+
+        if not artwork_id or not source:
+            _LOGGER.error("Artwork missing id or source: %s", artwork)
+            return None
+
+        try:
+            # Get provider by name and download artwork data
+            provider = provider_registry.get_provider_by_name(source)
+            if not provider:
+                _LOGGER.error("Provider not found: %s", source)
+                return None
+
+            _LOGGER.debug("Downloading artwork %s from %s", artwork_id, source)
+            image_data = await provider.async_get_artwork_data(artwork_id)
+
+            if not image_data:
+                _LOGGER.error("Failed to download artwork data for %s", artwork_id)
+                return None
+
+            # Determine file type from URL or default to JPG
+            url = artwork.get("url", "")
+            if url.lower().endswith(".png"):
+                file_type = "PNG"
+            else:
+                file_type = "JPG"
+
+            # Upload to TV
+            _LOGGER.debug("Uploading %s (%d bytes) to TV", artwork_id, len(image_data))
+            content_id = await self.hass.async_add_executor_job(
+                self._ws.upload_artwork,
+                image_data,
+                file_type,
+                None,  # matte (let TV decide)
+                None,  # portrait_matte
+                None,  # image_date
+                30     # timeout
+            )
+
+            if content_id:
+                _LOGGER.info("Successfully uploaded external artwork %s as %s", artwork_id, content_id)
+                return content_id
+            else:
+                _LOGGER.error("Upload returned no content_id for %s", artwork_id)
+                return None
+
+        except Exception as exc:
+            _LOGGER.error("Error uploading external artwork %s: %s", artwork_id, exc)
+            return None
 
     async def async_delete_artwork(self, artwork_id: str) -> None:
         """Delete an uploaded artwork."""

@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-import json
+from datetime import datetime, timedelta
 import logging
 from typing import Any
 
 from homeassistant.components.media_player.const import DOMAIN as MP_DOMAIN
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST
+from homeassistant.const import CONF_HOST, UnitOfTime
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -18,6 +17,7 @@ from homeassistant.helpers.event import async_call_later, async_track_state_chan
 
 from .const import DATA_CFG, DATA_WS, DOMAIN
 from .entity import SamsungTVEntity
+from .slideshow import SlideshowQueueManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ async def async_setup_entry(
         """Create art mode sensors after media player is ready."""
         config = hass.data[DOMAIN][config_entry.entry_id][DATA_CFG]
         ws_instance = hass.data[DOMAIN][config_entry.entry_id].get(DATA_WS)
+        queue_manager = hass.data[DOMAIN][config_entry.entry_id].get("slideshow_queue")
 
         # Find the media player entity for this TV using entity registry
         entity_reg = er.async_get(hass)
@@ -69,6 +70,9 @@ async def async_setup_entry(
             CurrentArtworkSensor(config, config_entry.entry_id, media_player_entity_id, ws_instance),
             SlideshowStatusSensor(config, config_entry.entry_id, media_player_entity_id, ws_instance),
         ]
+        if queue_manager:
+            entities.append(SlideshowNextArtwork(config, config_entry.entry_id, media_player_entity_id, ws_instance, queue_manager))
+
         async_add_entities(entities, True)
         _LOGGER.debug(
             "Successfully set up art mode sensors for %s",
@@ -364,3 +368,71 @@ class SlideshowStatusSensor(ArtModeSensorBase):
             })
 
         return attrs
+
+
+class SlideshowNextArtwork(SamsungTVEntity, SensorEntity):
+    """Sensor for time to next artwork in slideshow."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Slideshow time to next"
+    _attr_icon = "mdi:timer-sand"
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+
+    def __init__(
+        self,
+        config: dict[str, Any],
+        entry_id: str,
+        media_player_entity_id: str,
+        ws_instance: Any,
+        queue_manager: SlideshowQueueManager,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(config, entry_id)
+        self._media_player_entity_id = media_player_entity_id
+        self._ws = ws_instance
+        self._queue_manager = queue_manager
+        self._attr_unique_id = f"{entry_id}_slideshow_next_artwork"
+        self._switch_entity_id = f"switch.{entry_id.replace('-', '_')}_slideshow"
+        self._next_artwork_at: datetime | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Set up state change tracking."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_track_state_change_event(
+                self.hass, [self._switch_entity_id], self._handle_switch_update
+            )
+        )
+
+    @callback
+    def _handle_switch_update(self, event) -> None:
+        """Handle slideshow switch state changes."""
+        new_state = event.data.get("new_state")
+        if not new_state:
+            return
+
+        is_on = new_state.state == "on"
+        if is_on:
+            interval = new_state.attributes.get("interval", 10) * 60
+            self._next_artwork_at = datetime.utcnow() + timedelta(seconds=interval)
+        else:
+            self._next_artwork_at = None
+        self.async_write_ha_state()
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        media_player_state = self.hass.states.get(self._media_player_entity_id)
+        if not media_player_state:
+            return False
+        art_mode_supported = media_player_state.attributes.get("art_mode_supported", False)
+        return art_mode_supported and self._ws is not None
+
+    @property
+    def native_value(self) -> int | None:
+        """Return time to next artwork in seconds."""
+        if not self._next_artwork_at:
+            return None
+
+        remaining = (self._next_artwork_at - datetime.utcnow()).total_seconds()
+        return max(0, int(remaining))
