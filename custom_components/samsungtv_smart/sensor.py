@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any
 
@@ -68,7 +68,6 @@ async def async_setup_entry(
         entities = [
             ArtModeStatusSensor(config, config_entry.entry_id, media_player_entity_id, ws_instance),
             CurrentArtworkSensor(config, config_entry.entry_id, media_player_entity_id, ws_instance),
-            SlideshowStatusSensor(config, config_entry.entry_id, media_player_entity_id, ws_instance),
         ]
         if queue_manager:
             entities.append(SlideshowNextArtwork(config, config_entry.entry_id, media_player_entity_id, ws_instance, queue_manager))
@@ -206,9 +205,9 @@ class ArtModeStatusSensor(ArtModeSensorBase):
 
 
 class CurrentArtworkSensor(ArtModeSensorBase):
-    """Sensor for currently displayed artwork information."""
+    """Sensor for currently displayed artwork thumbnail."""
 
-    _attr_name = "Current artwork"
+    _attr_name = "Current artwork thumbnail"
     _attr_icon = "mdi:image-frame"
 
     def __init__(
@@ -286,97 +285,13 @@ class CurrentArtworkSensor(ArtModeSensorBase):
         return attrs
 
 
-class SlideshowStatusSensor(ArtModeSensorBase):
-    """Sensor for slideshow status and settings."""
-
-    _attr_name = "Slideshow status"
-    _attr_icon = "mdi:slideshow"
-
-    def __init__(
-        self,
-        config: dict[str, Any],
-        entry_id: str,
-        media_player_entity_id: str,
-        ws_instance: Any = None,
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(config, entry_id, media_player_entity_id, ws_instance)
-        self._attr_unique_id = f"{self.unique_id}_slideshow_status"
-        self._slideshow_data = None
-
-    @property
-    def native_value(self) -> str | None:
-        """Return the slideshow status."""
-        slideshow_data = self._get_slideshow_data()
-        if not slideshow_data:
-            return "unknown"
-
-        # Try different fields for slideshow status
-        for status_field in ["value", "status", "state", "enabled", "running"]:
-            if status_field in slideshow_data:
-                status = slideshow_data[status_field]
-                if isinstance(status, bool):
-                    return "on" if status else "off"
-                elif isinstance(status, str):
-                    return status.lower()
-
-        return "unknown"
-
-    def _get_slideshow_data(self) -> dict[str, Any] | None:
-        """Get slideshow data from websocket."""
-        if not self._ws:
-            return self._slideshow_data
-
-        # Get current slideshow status from websocket
-        slideshow_status = self._get_ws_data("_slideshow_status")
-        if slideshow_status and isinstance(slideshow_status, dict):
-            self._slideshow_data = slideshow_status
-            return slideshow_status
-
-        # Request slideshow status if not available
-        if self._ws and hasattr(self._ws, 'request_slideshow_status'):
-            self._ws.request_slideshow_status()
-
-        return self._slideshow_data
-
-    @property
-    def available(self) -> bool:
-        """Return True if entity is available and art mode is supported."""
-        if not super().available:
-            return False
-
-        # Available when art mode is supported (not necessarily on)
-        if self._ws:
-            artmode_status = self._get_ws_data("artmode_status")
-            if artmode_status and hasattr(artmode_status, 'name'):
-                return artmode_status.name.lower() != "unsupported"
-
-        return True
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any] | None:
-        """Return additional slideshow attributes."""
-        attrs = {"media_player_entity_id": self._media_player_entity_id}
-
-        slideshow_data = self._get_slideshow_data()
-        if slideshow_data:
-            attrs.update({
-                "interval": slideshow_data.get("interval"),
-                "category": slideshow_data.get("category"),
-                "random_order": slideshow_data.get("random_order"),
-                "full_data": slideshow_data,
-            })
-
-        return attrs
-
-
 class SlideshowNextArtwork(SamsungTVEntity, SensorEntity):
     """Sensor for time to next artwork in slideshow."""
 
     _attr_has_entity_name = True
     _attr_name = "Slideshow time to next"
     _attr_icon = "mdi:timer-sand"
-    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
 
     def __init__(
         self,
@@ -414,7 +329,7 @@ class SlideshowNextArtwork(SamsungTVEntity, SensorEntity):
         is_on = new_state.state == "on"
         if is_on:
             interval = new_state.attributes.get("interval", 10) * 60
-            self._next_artwork_at = datetime.utcnow() + timedelta(seconds=interval)
+            self._next_artwork_at = datetime.now(timezone.utc) + timedelta(seconds=interval)
         else:
             self._next_artwork_at = None
         self.async_write_ha_state()
@@ -429,10 +344,6 @@ class SlideshowNextArtwork(SamsungTVEntity, SensorEntity):
         return art_mode_supported and self._ws is not None
 
     @property
-    def native_value(self) -> int | None:
-        """Return time to next artwork in seconds."""
-        if not self._next_artwork_at:
-            return None
-
-        remaining = (self._next_artwork_at - datetime.utcnow()).total_seconds()
-        return max(0, int(remaining))
+    def native_value(self) -> datetime | None:
+        """Return timestamp when next artwork will be shown."""
+        return self._next_artwork_at

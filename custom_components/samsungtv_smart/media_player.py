@@ -651,7 +651,7 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
             result = self._get_external_entity_status()
 
         if result:
-            if self._ws.artmode_status == ArtModeStatus.On:
+            if self._ws.artmode_status in (ArtModeStatus.On, ArtModeStatus.Unavailable):
                 result = False
 
         return result

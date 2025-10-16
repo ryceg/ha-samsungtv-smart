@@ -68,6 +68,9 @@ async def async_setup_entry(
         # Create art mode image entity with WebSocket instance
         entities = [ArtModeImageEntity(hass, config, config_entry.entry_id, media_player_entity_id, ws_instance)]
 
+        # Add current artwork image
+        entities.append(CurrentArtworkImage(hass, config, config_entry.entry_id, media_player_entity_id, ws_instance, queue_manager))
+
         # Add slideshow preview images if queue manager is available
         if queue_manager:
             entities.extend([
@@ -239,6 +242,138 @@ class ArtModeImageEntity(SamsungTVEntity, ImageEntity):
             "artwork_category": artwork_data.get("category"),
             "media_player_entity_id": self._media_player_entity_id,
         }
+
+
+class CurrentArtworkImage(SamsungTVEntity, ImageEntity):
+    """Image entity showing currently displayed artwork on the TV."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Current artwork"
+    _attr_icon = "mdi:image-frame"
+    _attr_content_type = "image/jpeg"
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config: dict[str, Any],
+        entry_id: str,
+        media_player_entity_id: str,
+        ws_instance: Any,
+        queue_manager: SlideshowQueueManager | None,
+    ) -> None:
+        """Initialize the current artwork image entity."""
+        self._entry_id = entry_id
+        self._media_player_entity_id = media_player_entity_id
+        self._ws = ws_instance
+        self._queue_manager = queue_manager
+
+        SamsungTVEntity.__init__(self, config, entry_id)
+        ImageEntity.__init__(self, hass)
+
+        self._attr_unique_id = f"{entry_id}_current_artwork_image"
+        self._cached_image: bytes | None = None
+        self._last_artwork_id: str | None = None
+        self._last_non_overlay_artwork_id: str | None = None
+        self._last_non_overlay_image: bytes | None = None
+
+    @property
+    def entity_picture(self) -> str | None:
+        """Return entity picture URL, handling empty access tokens."""
+        if not self.access_tokens:
+            return None
+        return super().entity_picture
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        media_player_state = self.hass.states.get(self._media_player_entity_id)
+        if not media_player_state:
+            return False
+        art_mode_supported = media_player_state.attributes.get("art_mode_supported", False)
+        return art_mode_supported and self._ws is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        attrs = {}
+
+        # Get current artwork from websocket
+        if self._ws and hasattr(self._ws, "_current_artwork"):
+            current_artwork = self._ws._current_artwork
+            if current_artwork:
+                content_id = current_artwork.get("content_id")
+
+                # Check if this is an overlay image
+                is_overlay = False
+                if self._queue_manager and content_id:
+                    is_overlay = self._queue_manager.is_overlay_image(content_id)
+
+                if is_overlay:
+                    # Show the overlay info but indicate we're displaying the underlying artwork
+                    attrs["overlay_active"] = True
+                    attrs["overlay_content_id"] = content_id
+                    # Return the last non-overlay artwork info
+                    if self._last_non_overlay_artwork_id:
+                        attrs["content_id"] = self._last_non_overlay_artwork_id
+                else:
+                    # Not an overlay, show current artwork
+                    attrs["content_id"] = content_id
+                    attrs["overlay_active"] = False
+
+                    # Add artwork metadata (only for non-overlay)
+                    if "name" in current_artwork:
+                        attrs["artwork_name"] = current_artwork["name"]
+                    if "category" in current_artwork:
+                        attrs["category"] = current_artwork["category"]
+
+        return attrs
+
+    async def async_image(self) -> bytes | None:
+        """Return bytes of current artwork displayed on TV, ignoring overlays."""
+        if not self._ws:
+            return None
+
+        # Get current artwork from websocket
+        current_artwork = None
+        if hasattr(self._ws, "_current_artwork"):
+            current_artwork = self._ws._current_artwork
+
+        if not current_artwork:
+            return self._last_non_overlay_image
+
+        content_id = current_artwork.get("content_id")
+        if not content_id:
+            return self._last_non_overlay_image
+
+        # Check if this is an overlay image - if so, return last non-overlay image
+        if self._queue_manager and self._queue_manager.is_overlay_image(content_id):
+            _LOGGER.debug("Ignoring overlay image %s, returning last non-overlay image", content_id)
+            return self._last_non_overlay_image
+
+        # Check if artwork changed
+        if content_id != self._last_artwork_id:
+            self._cached_image = None
+            self._last_artwork_id = content_id
+
+        # Return cached image if available
+        if self._cached_image:
+            return self._cached_image
+
+        try:
+            # Get thumbnail from TV
+            thumbnail = await self.hass.async_add_executor_job(
+                self._ws.get_artwork_thumbnail, content_id
+            )
+            if thumbnail:
+                self._cached_image = thumbnail
+                # Save this as last non-overlay image
+                self._last_non_overlay_artwork_id = content_id
+                self._last_non_overlay_image = thumbnail
+                return thumbnail
+        except Exception as exc:
+            _LOGGER.debug("Error fetching current artwork thumbnail for %s: %s", content_id, exc)
+
+        return self._last_non_overlay_image
 
 
 class SlideshowImageBase(SamsungTVEntity, ImageEntity):
