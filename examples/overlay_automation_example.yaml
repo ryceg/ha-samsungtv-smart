@@ -1,0 +1,145 @@
+# Example automation for Samsung Frame TV Overlay System
+#
+# This file shows example automations for controlling the overlay feature.
+# Copy the relevant parts to your Home Assistant configuration.
+
+# Turn on overlay in the morning on weekdays
+automation:
+  - alias: "Frame TV - Enable Info Overlay Morning"
+    trigger:
+      - platform: time
+        at: "07:00:00"
+    condition:
+      - condition: time
+        weekday:
+          - mon
+          - tue
+          - wed
+          - thu
+          - fri
+    action:
+      - service: switch.turn_on
+        target:
+          entity_id: switch.living_room_tv_art_overlay
+
+  # Turn off overlay when someone arrives home
+  - alias: "Frame TV - Disable Overlay When Home"
+    trigger:
+      - platform: state
+        entity_id: person.john
+        to: "home"
+    action:
+      - service: switch.turn_off
+        target:
+          entity_id: switch.living_room_tv_art_overlay
+
+  # Configure overlay on startup
+  - alias: "Frame TV - Configure Overlay on Startup"
+    trigger:
+      - platform: homeassistant
+        event: start
+    action:
+      - delay: "00:01:00" # Wait for entities to be ready
+      - service: samsungtv_smart.overlay_configure
+        target:
+          entity_id: switch.living_room_tv_art_overlay
+        data:
+          calendar_entities: "calendar.personal,calendar.family"
+          weather_entity: weather.home
+          todo_entities: "todo.shopping,todo.tasks"
+          update_interval: 300
+
+  # Refresh overlay when calendar events change
+  - alias: "Frame TV - Refresh Overlay on Calendar Change"
+    trigger:
+      - platform: state
+        entity_id:
+          - calendar.personal
+          - calendar.family
+    condition:
+      - condition: state
+        entity_id: switch.living_room_tv_art_overlay
+        state: "on"
+    action:
+      - service: samsungtv_smart.overlay_refresh
+        target:
+          entity_id: switch.living_room_tv_art_overlay
+
+  # Enable overlay before grocery shopping time
+  - alias: "Frame TV - Show Shopping List"
+    trigger:
+      - platform: time
+        at: "10:00:00"
+    condition:
+      - condition: time
+        weekday:
+          - sun
+    action:
+      - service: samsungtv_smart.overlay_configure
+        target:
+          entity_id: switch.living_room_tv_art_overlay
+        data:
+          calendar_entities: "calendar.personal"
+          weather_entity: weather.home
+          todo_entities: "todo.shopping"
+          update_interval: 180 # Update every 3 minutes
+      - service: switch.turn_on
+        target:
+          entity_id: switch.living_room_tv_art_overlay
+
+  # Clear overlay for movie night
+  - alias: "Frame TV - Clear Overlay for Movie Night"
+    trigger:
+      - platform: state
+        entity_id: media_player.living_room_tv
+        to: "playing"
+    condition:
+      - condition: state
+        entity_id: switch.living_room_tv_art_overlay
+        state: "on"
+    action:
+      - service: samsungtv_smart.overlay_clear
+        target:
+          entity_id: switch.living_room_tv_art_overlay
+
+# Script examples
+script:
+  # Quick toggle overlay
+  frame_tv_toggle_overlay:
+    alias: "Toggle Frame TV Overlay"
+    sequence:
+      - service: switch.toggle
+        target:
+          entity_id: switch.living_room_tv_art_overlay
+
+  # Setup overlay for specific scenario
+  frame_tv_meeting_mode:
+    alias: "Frame TV Meeting Mode"
+    sequence:
+      - service: samsungtv_smart.overlay_configure
+        target:
+          entity_id: switch.living_room_tv_art_overlay
+        data:
+          calendar_entities: "calendar.work,calendar.meetings"
+          weather_entity: weather.home
+          todo_entities: "todo.work_tasks"
+          update_interval: 120 # Every 2 minutes for active meetings
+      - service: switch.turn_on
+        target:
+          entity_id: switch.living_room_tv_art_overlay
+
+  # Minimal overlay - just time
+  frame_tv_minimal_overlay:
+    alias: "Frame TV Minimal Overlay"
+    sequence:
+      - service: samsungtv_smart.overlay_configure
+        target:
+          entity_id: switch.living_room_tv_art_overlay
+        data:
+          calendar_entities: ""
+          weather_entity: ""
+          todo_entities: ""
+          update_interval: 600 # Every 10 minutes
+      - service: switch.turn_on
+        target:
+          entity_id: switch.living_room_tv_art_overlay

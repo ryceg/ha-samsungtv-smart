@@ -683,6 +683,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Create and store slideshow queue manager
     hass.data[DOMAIN][entry.entry_id]["slideshow_queue"] = SlideshowQueueManager()
 
+    # Create and store overlay generator (imported inline to avoid circular dependency)
+    from .overlay_generator import OverlayGenerator
+    hass.data[DOMAIN][entry.entry_id]["overlay_generator"] = OverlayGenerator(hass)
+
     # Forward setup to all platforms
     await hass.config_entries.async_forward_entry_setups(entry, SAMSMART_PLATFORM)
 

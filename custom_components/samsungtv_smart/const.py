@@ -110,6 +110,21 @@ SERVICE_SLIDESHOW_SET_OVERLAY = "slideshow_set_overlay"
 SERVICE_SLIDESHOW_SET_SHUFFLE = "slideshow_set_shuffle"
 SERVICE_SLIDESHOW_LOAD_ARTWORKS = "slideshow_load_artworks"
 SERVICE_SLIDESHOW_SET_AUTO_RANDOM = "slideshow_set_auto_random"
+SERVICE_OVERLAY_CONFIGURE = "overlay_configure"
+SERVICE_OVERLAY_REFRESH = "overlay_refresh"
+SERVICE_OVERLAY_CLEAR = "overlay_clear"
+
+# Overlay configuration keys
+CONF_OVERLAY_ENABLED = "overlay_enabled"
+CONF_OVERLAY_CALENDAR_ENTITIES = "overlay_calendar_entities"
+CONF_OVERLAY_WEATHER_ENTITY = "overlay_weather_entity"
+CONF_OVERLAY_TODO_ENTITIES = "overlay_todo_entities"
+CONF_OVERLAY_UPDATE_INTERVAL = "overlay_update_interval"
+CONF_OVERLAY_TEMPLATE = "overlay_template"
+
+# Default overlay settings
+DEFAULT_OVERLAY_UPDATE_INTERVAL = 300  # 5 minutes
+DEFAULT_OVERLAY_TEMPLATE = "standard"
 
 SIGNAL_CONFIG_ENTITY = f"{DOMAIN}_config"
 

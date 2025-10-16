@@ -7,17 +7,31 @@ from datetime import datetime
 import logging
 from typing import Any
 
+import voluptuous as vol
+
 from homeassistant.components.media_player.const import DOMAIN as MP_DOMAIN
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 
-from .const import DATA_CFG, DATA_WS, DOMAIN
+from .const import (
+    CONF_OVERLAY_CALENDAR_ENTITIES,
+    CONF_OVERLAY_TODO_ENTITIES,
+    CONF_OVERLAY_WEATHER_ENTITY,
+    DATA_CFG,
+    DATA_WS,
+    DOMAIN,
+    SERVICE_OVERLAY_CLEAR,
+    SERVICE_OVERLAY_CONFIGURE,
+    SERVICE_OVERLAY_REFRESH,
+)
 from .entity import SamsungTVEntity
+from .overlay import OverlaySwitch
 from .slideshow import SlideshowQueueManager, CATEGORY_MY_PICTURES
 
 
@@ -68,8 +82,14 @@ async def async_setup_entry(
             _LOGGER.debug("Slideshow queue manager not found")
             return
 
+        overlay_generator = hass.data[DOMAIN][config_entry.entry_id].get("overlay_generator")
+        if not overlay_generator:
+            _LOGGER.debug("Overlay generator not found")
+            return
+
         entities = [
             SlideshowSwitch(config, config_entry.entry_id, media_player_entity_id, ws_instance, queue_manager),
+            OverlaySwitch(hass, config, config_entry.entry_id, ws_instance, overlay_generator),
         ]
         async_add_entities(entities, True)
         _LOGGER.debug(
@@ -78,6 +98,32 @@ async def async_setup_entry(
         )
 
     async_call_later(hass, 10, _add_entities)
+
+    # Register overlay services
+    platform = entity_platform.async_get_current_platform()
+
+    platform.async_register_entity_service(
+        SERVICE_OVERLAY_CONFIGURE,
+        {
+            vol.Optional("calendar_entities"): cv.string,
+            vol.Optional("weather_entity"): cv.entity_id,
+            vol.Optional("todo_entities"): cv.string,
+            vol.Optional("update_interval"): cv.positive_int,
+        },
+        "async_service_overlay_configure",
+    )
+
+    platform.async_register_entity_service(
+        SERVICE_OVERLAY_REFRESH,
+        {},
+        "async_service_overlay_refresh",
+    )
+
+    platform.async_register_entity_service(
+        SERVICE_OVERLAY_CLEAR,
+        {},
+        "async_service_overlay_clear",
+    )
 
 
 class SlideshowSwitch(SamsungTVEntity, SwitchEntity):

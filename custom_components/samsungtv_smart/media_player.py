@@ -228,6 +228,11 @@ async def async_setup_entry(
         {vol.Required("artwork_id"): cv.string},
         "async_delete_artwork",
     )
+    platform.async_register_entity_service(
+        "new_artwork",
+        {vol.Optional("matte"): cv.string},
+        "async_new_artwork",
+    )
     # Art Mode services for artwork management (brightness, color temp, matte, and filter now via entities)
     platform.async_register_entity_service(
         SERVICE_SET_ARTWORK_FAVORITE,
@@ -1523,6 +1528,74 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
             self._ws.delete_artwork, artwork_id
         )
         _LOGGER.info("Deleted artwork %s from %s", artwork_id, self.name)
+
+    async def async_new_artwork(self, matte: str | None = None) -> None:
+        """Download and display a random artwork from Art Institute of Chicago API."""
+        if not self._ws.art_mode_supported():
+            _LOGGER.error("Art mode not supported on this TV")
+            return
+
+        try:
+            import random
+
+            # Fetch random artwork from Art Institute of Chicago (free API, no auth)
+            search_url = (
+                "https://api.artic.edu/api/v1/artworks/search"
+                "?q=painting&fields=id,title,artist_display,image_id"
+                "&limit=100&query[term][is_public_domain]=true"
+            )
+
+            session = async_get_clientsession(self.hass)
+            async with async_timeout.timeout(10):
+                async with session.get(search_url) as response:
+                    if response.status != 200:
+                        _LOGGER.error("Failed to fetch artwork list: HTTP %d", response.status)
+                        return
+                    data = await response.json()
+
+            # Select random artwork with valid image
+            artworks = [art for art in data.get("data", []) if art.get("image_id")]
+            if not artworks:
+                _LOGGER.error("No artworks found")
+                return
+
+            artwork = random.choice(artworks)
+            title = artwork.get("title", "Untitled")
+            artist = artwork.get("artist_display", "Unknown")
+            image_id = artwork.get("image_id")
+
+            _LOGGER.info("Selected: '%s' by %s", title, artist)
+
+            # Download image (1920px width for Frame TV)
+            image_url = f"https://www.artic.edu/iiif/2/{image_id}/full/1920,/0/default.jpg"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": "https://www.artic.edu/",
+            }
+            async with async_timeout.timeout(30):
+                async with session.get(image_url, headers=headers) as response:
+                    if response.status != 200:
+                        _LOGGER.error("Failed to download image: HTTP %d", response.status)
+                        return
+                    image_data = await response.read()
+
+            # Upload and display using existing methods
+            content_id = await self.hass.async_add_executor_job(
+                self._ws.upload_artwork, image_data, "JPEG", matte
+            )
+
+            if content_id:
+                await self.hass.async_add_executor_job(
+                    self._ws.select_artwork, content_id, True
+                )
+                _LOGGER.info("Displayed: '%s' by %s", title, artist)
+            else:
+                _LOGGER.error("Upload failed")
+
+        except asyncio.TimeoutError:
+            _LOGGER.error("Timeout fetching artwork")
+        except Exception as exc:
+            _LOGGER.error("Error: %s", exc)
 
     async def async_set_artwork_favorite(self, artwork_id: str, favorite: bool = True) -> None:
         """Mark an artwork as favorite."""

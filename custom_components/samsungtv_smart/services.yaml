@@ -405,3 +405,71 @@ slideshow_set_auto_random:
       default: true
       selector:
         boolean:
+
+overlay_configure:
+  name: Configure Overlay
+  description: Configure entity sources for dynamic overlay display.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: switch
+  fields:
+    calendar_entities:
+      name: Calendar Entities
+      description: List of calendar entities to display events from
+      example: "calendar.personal,calendar.work"
+      selector:
+        text:
+    weather_entity:
+      name: Weather Entity
+      description: Weather entity to display current conditions
+      example: "weather.home"
+      selector:
+        entity:
+          domain: weather
+    todo_entities:
+      name: Todo Entities
+      description: List of todo entities to display items from
+      example: "todo.shopping,todo.tasks"
+      selector:
+        text:
+    update_interval:
+      name: Update Interval
+      description: How often to refresh overlay in seconds
+      default: 300
+      selector:
+        number:
+          min: 60
+          max: 3600
+          unit_of_measurement: "seconds"
+
+overlay_refresh:
+  name: Refresh Overlay
+  description: Manually trigger an overlay update with current data.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: switch
+
+overlay_clear:
+  name: Clear Overlay
+  description: Remove the current overlay and return to underlying artwork.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: switch
+
+new_artwork:
+  name: New Artwork
+  description: Download and display a random artwork from a free art museum API.
+  target:
+    entity:
+      integration: samsungtv_smart
+      domain: media_player
+  fields:
+    matte:
+      name: Matte Color
+      description: Optional matte color (e.g., 'modern_apricot', 'none')
+      example: "none"
+      selector:
+        text:
